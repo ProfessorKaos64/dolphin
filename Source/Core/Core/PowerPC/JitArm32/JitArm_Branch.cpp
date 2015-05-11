@@ -3,7 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "Common/ArmEmitter.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
@@ -20,7 +20,6 @@ using namespace ArmGen;
 void JitArm::sc(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
-	JITDISABLE(bJITBranchOff);
 
 	gpr.Flush();
 	fpr.Flush();
@@ -39,7 +38,6 @@ void JitArm::sc(UGeckoInstruction inst)
 void JitArm::rfi(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
-	JITDISABLE(bJITBranchOff);
 
 	gpr.Flush();
 	fpr.Flush();
@@ -86,7 +84,6 @@ void JitArm::rfi(UGeckoInstruction inst)
 void JitArm::bx(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
-	JITDISABLE(bJITBranchOff);
 	// We must always process the following sentence
 	// even if the blocks are merged by PPCAnalyst::Flatten().
 	if (inst.LK)
@@ -97,10 +94,12 @@ void JitArm::bx(UGeckoInstruction inst)
 		STR(rA, R9, PPCSTATE_OFF(spr[SPR_LR]));
 		//ARMABI_MOVI2M((u32)&LR, js.compilerPC + 4);
 	}
+
 	// If this is not the last instruction of a block,
 	// we will skip the rest process.
 	// Because PPCAnalyst::Flatten() merged the blocks.
-	if (!js.isLastInstruction) {
+	if (!js.isLastInstruction)
+	{
 		return;
 	}
 
@@ -131,7 +130,6 @@ void JitArm::bx(UGeckoInstruction inst)
 void JitArm::bcx(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
-	JITDISABLE(bJITBranchOff);
 	// USES_CR
 
 	ARMReg rA = gpr.GetReg();
@@ -191,7 +189,6 @@ void JitArm::bcx(UGeckoInstruction inst)
 void JitArm::bcctrx(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
-	JITDISABLE(bJITBranchOff);
 
 	// bcctrx doesn't decrement and/or test CTR
 	_dbg_assert_msg_(POWERPC, inst.BO_2 & BO_DONT_DECREMENT_FLAG, "bcctrx with decrement and test CTR option is invalid!");
@@ -231,7 +228,8 @@ void JitArm::bcctrx(UGeckoInstruction inst)
 		LDR(rA, R9, PPCSTATE_OFF(spr[SPR_CTR]));
 		BIC(rA, rA, 0x3);
 
-		if (inst.LK_3){
+		if (inst.LK_3)
+		{
 			u32 Jumpto = js.compilerPC + 4;
 			MOVI2R(rB, Jumpto);
 			STR(rB, R9, PPCSTATE_OFF(spr[SPR_LR]));
@@ -256,7 +254,6 @@ void JitArm::bcctrx(UGeckoInstruction inst)
 void JitArm::bclrx(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
-	JITDISABLE(bJITBranchOff);
 
 	ARMReg rA = gpr.GetReg();
 	ARMReg rB = gpr.GetReg();
@@ -285,7 +282,8 @@ void JitArm::bclrx(UGeckoInstruction inst)
 	//AND(32, R(EAX), Imm32(0xFFFFFFFC));
 	LDR(rA, R9, PPCSTATE_OFF(spr[SPR_LR]));
 	BIC(rA, rA, 0x3);
-	if (inst.LK){
+	if (inst.LK)
+	{
 		u32 Jumpto = js.compilerPC + 4;
 		MOVI2R(rB, Jumpto);
 		STR(rB, R9, PPCSTATE_OFF(spr[SPR_LR]));

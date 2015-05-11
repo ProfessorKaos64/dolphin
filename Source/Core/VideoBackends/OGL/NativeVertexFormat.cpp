@@ -35,7 +35,7 @@ GLVertexFormat::~GLVertexFormat()
 	glDeleteVertexArrays(1, &VAO);
 }
 
-inline GLuint VarToGL(VarType t)
+static inline GLuint VarToGL(VarType t)
 {
 	static const GLuint lookup[5] = {
 		GL_UNSIGNED_BYTE, GL_BYTE, GL_UNSIGNED_SHORT, GL_SHORT, GL_FLOAT
@@ -58,7 +58,7 @@ static void SetPointer(u32 attrib, u32 stride, const AttributeFormat &format)
 void GLVertexFormat::Initialize(const PortableVertexDeclaration &_vtx_decl)
 {
 	this->vtx_decl = _vtx_decl;
-	vertex_stride = vtx_decl.stride;
+	u32 vertex_stride = _vtx_decl.stride;
 
 	// We will not allow vertex components causing uneven strides.
 	if (vertex_stride & 3)
@@ -75,24 +75,22 @@ void GLVertexFormat::Initialize(const PortableVertexDeclaration &_vtx_decl)
 
 	SetPointer(SHADER_POSITION_ATTRIB, vertex_stride, vtx_decl.position);
 
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < 3; i++)
 		SetPointer(SHADER_NORM0_ATTRIB+i, vertex_stride, vtx_decl.normals[i]);
-	}
 
-	for (int i = 0; i < 2; i++) {
+	for (int i = 0; i < 2; i++)
 		SetPointer(SHADER_COLOR0_ATTRIB+i, vertex_stride, vtx_decl.colors[i]);
-	}
 
-	for (int i = 0; i < 8; i++) {
+	for (int i = 0; i < 8; i++)
 		SetPointer(SHADER_TEXTURE0_ATTRIB+i, vertex_stride, vtx_decl.texcoords[i]);
-	}
 
 	SetPointer(SHADER_POSMTX_ATTRIB, vertex_stride, vtx_decl.posmtx);
 
 	vm->m_last_vao = VAO;
 }
 
-void GLVertexFormat::SetupVertexPointers() {
+void GLVertexFormat::SetupVertexPointers()
+{
 }
 
 }

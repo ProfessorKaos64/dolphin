@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "Common/SysConf.h"
-#include "Core/Boot/Boot.h"
+#include "Core/CoreParameter.h"
 #include "Core/HW/EXI_Device.h"
 #include "Core/HW/SI_Device.h"
 
@@ -17,7 +17,6 @@
 #define BACKEND_ALSA        "ALSA"
 #define BACKEND_AOSOUND     "AOSound"
 #define BACKEND_COREAUDIO   "CoreAudio"
-#define BACKEND_DIRECTSOUND "DSound"
 #define BACKEND_OPENAL      "OpenAL"
 #define BACKEND_PULSEAUDIO  "Pulse"
 #define BACKEND_XAUDIO2     "XAudio2"
@@ -33,7 +32,7 @@ struct SConfig : NonCopyable
 	// name of the last used filename
 	std::string m_LastFilename;
 
-	// gcm folder
+	// ISO folder
 	std::vector<std::string> m_ISOFolder;
 	bool m_RecursiveISOFolder;
 
@@ -42,6 +41,8 @@ struct SConfig : NonCopyable
 
 	std::string m_strMemoryCardA;
 	std::string m_strMemoryCardB;
+	std::string m_strGbaCartA;
+	std::string m_strGbaCartB;
 	TEXIDevices m_EXIDevice[3];
 	SIDevices m_SIDevice[4];
 	std::string m_bba_mac;
@@ -50,6 +51,8 @@ struct SConfig : NonCopyable
 	int m_InterfaceLanguage;
 	// framelimit choose
 	unsigned int m_Framelimit;
+	bool m_OCEnable;
+	float m_OCFactor;
 	// other interface settings
 	bool m_InterfaceToolbar;
 	bool m_InterfaceStatusbar;
@@ -64,10 +67,16 @@ struct SConfig : NonCopyable
 	bool m_ListPal;
 	bool m_ListUsa;
 	bool m_ListJap;
+	bool m_ListAustralia;
 	bool m_ListFrance;
+	bool m_ListGermany;
 	bool m_ListItaly;
 	bool m_ListKorea;
+	bool m_ListNetherlands;
+	bool m_ListRussia;
+	bool m_ListSpain;
 	bool m_ListTaiwan;
+	bool m_ListWorld;
 	bool m_ListUnknown;
 	int m_ListSort;
 	int m_ListSort2;
@@ -75,7 +84,7 @@ struct SConfig : NonCopyable
 	// Game list column toggles
 	bool m_showSystemColumn;
 	bool m_showBannerColumn;
-	bool m_showNotesColumn;
+	bool m_showMakerColumn;
 	bool m_showIDColumn;
 	bool m_showRegionColumn;
 	bool m_showSizeColumn;
@@ -87,29 +96,38 @@ struct SConfig : NonCopyable
 	std::string m_WirelessMac;
 	bool m_PauseMovie;
 	bool m_ShowLag;
+	bool m_ShowFrameCount;
 	std::string m_strMovieAuthor;
 	unsigned int m_FrameSkip;
+	bool m_DumpFrames;
+	bool m_DumpFramesSilent;
+	bool m_ShowInputDisplay;
+
+	bool m_PauseOnFocusLost;
 
 	// DSP settings
 	bool m_DSPEnableJIT;
 	bool m_DSPCaptureLog;
 	bool m_DumpAudio;
+	bool m_IsMuted;
 	int m_Volume;
 	std::string sBackend;
 
 	// Input settings
 	bool m_BackgroundInput;
+	bool m_GameCubeAdapter;
+	bool m_AdapterRumble;
 
 	SysConf* m_SYSCONF;
 
-	// save settings
+	// Save settings
 	void SaveSettings();
 
-	// load settings
+	// Load settings
 	void LoadSettings();
 
 	// Return the permanent and somewhat globally used instance of this struct
-	static SConfig& GetInstance() {return(*m_Instance);}
+	static SConfig& GetInstance() { return(*m_Instance); }
 
 	static void Init();
 	static void Shutdown();

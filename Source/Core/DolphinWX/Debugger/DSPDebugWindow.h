@@ -4,10 +4,7 @@
 
 #pragma once
 
-#include <wx/defs.h>
-#include <wx/event.h>
 #include <wx/panel.h>
-#include <wx/windowid.h>
 #include <wx/aui/framemanager.h>
 
 #include "Common/CommonTypes.h"
@@ -19,7 +16,6 @@ class CMemoryView;
 class wxAuiNotebook;
 class wxAuiToolBar;
 class wxListBox;
-class wxWindow;
 
 class DSPDebuggerLLE : public wxPanel
 {
@@ -30,17 +26,12 @@ public:
 	void Update() override;
 
 private:
-	DECLARE_EVENT_TABLE();
-
 	enum
 	{
 		ID_TOOLBAR = 1000,
 		ID_RUNTOOL,
 		ID_STEPTOOL,
 		ID_SHOWPCTOOL,
-		ID_ADDRBOX,
-		ID_SYMBOLLIST,
-		ID_DSP_REGS
 	};
 
 	DSPDebugInterface debug_interface;
@@ -59,6 +50,7 @@ private:
 	CMemoryView* m_MemView;
 	DSPRegisterView* m_Regs;
 	wxListBox* m_SymbolList;
+	wxTextCtrl* m_addr_txtctrl;
 	wxAuiNotebook* m_MainNotebook;
 
 	void OnClose(wxCloseEvent& event);

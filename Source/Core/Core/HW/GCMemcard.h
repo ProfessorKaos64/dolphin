@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <string>
 
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/NandPaths.h"
 #include "Common/StringUtil.h"
 
@@ -70,14 +70,16 @@ public:
 	{
 	}
 	virtual ~MemoryCardBase() {}
-	virtual void Flush(bool exiting = false) = 0;
 	virtual s32 Read(u32 address, s32 length, u8 *destaddress) = 0;
 	virtual s32 Write(u32 destaddress, s32 length, u8 *srcaddress) = 0;
 	virtual void ClearBlock(u32 address) = 0;
 	virtual void ClearAll() = 0;
 	virtual void DoState(PointerWrap &p) = 0;
-	virtual void JoinThread() {};
-	u32 GetCardId() { return nintendo_card_id; }
+	u32 GetCardId() const { return nintendo_card_id; }
+	bool IsAddressInBounds(u32 address) const
+	{
+		return address <= (memory_card_size - 1);
+	}
 
 protected:
 	int card_index;
@@ -103,7 +105,8 @@ struct GCMBlock
 void calc_checksumsBE(u16 *buf, u32 length, u16 *csum, u16 *inv_csum);
 
 #pragma pack(push,1)
-struct Header {         //Offset    Size    Description
+struct Header           //Offset    Size    Description
+{
 	// Serial in libogc
 	u8 serial[12];      //0x0000    12      ?
 	u64 formatTime;     //0x000c    8       Time of format (OSTime value)
@@ -299,11 +302,11 @@ class GCIFile
 {
 public:
 	bool LoadSaveBlocks();
-	bool HasCopyProtection()
+	bool HasCopyProtection() const
 	{
-		if ((strcmp((char *)m_gci_header.Filename, "PSO_SYSTEM") == 0) ||
-			(strcmp((char *)m_gci_header.Filename, "PSO3_SYSTEM") == 0) ||
-			(strcmp((char *)m_gci_header.Filename, "f_zero.dat") == 0))
+		if ((strcmp((char*)m_gci_header.Filename, "PSO_SYSTEM") == 0) ||
+			(strcmp((char*)m_gci_header.Filename, "PSO3_SYSTEM") == 0) ||
+			(strcmp((char*)m_gci_header.Filename, "f_zero.dat") == 0))
 			return true;
 		return false;
 	}

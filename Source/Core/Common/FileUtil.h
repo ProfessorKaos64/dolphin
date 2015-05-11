@@ -36,6 +36,7 @@ enum {
 	D_DUMPAUDIO_IDX,
 	D_DUMPTEXTURES_IDX,
 	D_DUMPDSP_IDX,
+	D_LOAD_IDX,
 	D_LOGS_IDX,
 	D_MAILLOGS_IDX,
 	D_WIISYSCONF_IDX,
@@ -125,9 +126,13 @@ bool SetCurrentDir(const std::string &directory);
 // Get a filename that can hopefully be atomically renamed to the given path.
 std::string GetTempFilenameForAtomicWrite(const std::string &path);
 
-// Returns a pointer to a string with a Dolphin data dir in the user's home
-// directory. To be used in "multi-user" mode (that is, installed).
-const std::string& GetUserPath(const unsigned int DirIDX, const std::string &newPath="");
+// Gets a set user directory path
+// Don't call prior to setting the base user directory
+const std::string& GetUserPath(unsigned int dir_index);
+
+// Sets a user directory path
+// Rebuilds internal directory structure to compensate for the new directory
+void SetUserPath(unsigned int dir_index, const std::string& path);
 
 // probably doesn't belong here
 std::string GetThemeDir(const std::string& theme_name);
@@ -198,10 +203,10 @@ public:
 		return WriteArray(reinterpret_cast<const char*>(data), length);
 	}
 
-	bool IsOpen() { return nullptr != m_file; }
+	bool IsOpen() const { return nullptr != m_file; }
 
 	// m_good is set to false when a read, write or other function fails
-	bool IsGood() { return m_good; }
+	bool IsGood() const { return m_good; }
 	operator void*() { return m_good ? m_file : nullptr; }
 
 	std::FILE* ReleaseHandle();
@@ -211,7 +216,7 @@ public:
 	void SetHandle(std::FILE* file);
 
 	bool Seek(s64 off, int origin);
-	u64 Tell();
+	u64 Tell() const;
 	u64 GetSize();
 	bool Resize(u64 size);
 	bool Flush();

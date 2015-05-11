@@ -3,20 +3,14 @@
 // Refer to the license.txt file included.
 
 #include <string>
-#include <wx/chartype.h>
 #include <wx/checkbox.h>
-#include <wx/defs.h>
 #include <wx/dialog.h>
-#include <wx/event.h>
-#include <wx/gdicmn.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
-#include <wx/string.h>
 #include <wx/textctrl.h>
-#include <wx/translation.h>
 
 #include "Common/BreakPoints.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "DolphinWX/WxUtils.h"
@@ -25,14 +19,12 @@
 
 #define TEXT_BOX(text) new wxStaticText(this, wxID_ANY, _(text))
 
-BEGIN_EVENT_TABLE(MemoryCheckDlg, wxDialog)
-	EVT_BUTTON(wxID_OK, MemoryCheckDlg::OnOK)
-END_EVENT_TABLE()
-
 MemoryCheckDlg::MemoryCheckDlg(CBreakPointWindow *parent)
 	: wxDialog(parent, wxID_ANY, _("Memory Check"))
 	, m_parent(parent)
 {
+	Bind(wxEVT_BUTTON, &MemoryCheckDlg::OnOK, this);
+
 	m_pEditStartAddress = new wxTextCtrl(this, wxID_ANY, "");
 	m_pEditEndAddress = new wxTextCtrl(this, wxID_ANY, "");
 	m_pWriteFlag = new wxCheckBox(this, wxID_ANY, _("Write"));
@@ -77,7 +69,7 @@ void MemoryCheckDlg::OnOK(wxCommandEvent& event)
 	bool OnRead = m_pReadFlag->GetValue();
 	bool OnWrite = m_pWriteFlag->GetValue();
 	bool Log = m_log_flag->GetValue();
-	bool Break = m_break_flag->GetValue();;
+	bool Break = m_break_flag->GetValue();
 
 	u32 StartAddress, EndAddress;
 	bool EndAddressOK = EndAddressString.Len() &&

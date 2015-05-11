@@ -42,14 +42,12 @@ namespace DriverDetails
 		DRIVER_R600,         // OSS Radeon
 		DRIVER_INTEL,        // Official Intel
 		DRIVER_I965,         // OSS Intel
-		DRIVER_ARM_MIDGARD,  // Official Mali driver
-		DRIVER_ARM_UTGARD,   // Official Mali driver
+		DRIVER_ARM,          // Official Mali driver
 		DRIVER_LIMA,         // OSS Mali driver
-		DRIVER_QUALCOMM_3XX, // Official Adreno driver 3xx
-		DRIVER_QUALCOMM_2XX, // Official Adreno driver 2xx
+		DRIVER_QUALCOMM,     // Official Adreno driver
 		DRIVER_FREEDRENO,    // OSS Adreno driver
-		DRIVER_IMGTEC,       // OSS PowerVR driver
-		DRIVER_VIVANTE,      // Official vivante driver
+		DRIVER_IMGTEC,       // Official PowerVR driver
+		DRIVER_VIVANTE,      // Official Vivante driver
 		DRIVER_UNKNOWN       // Unknown driver, default to official hardware driver
 	};
 
@@ -62,14 +60,11 @@ namespace DriverDetails
 		// Bug: No Dynamic UBO array object access
 		// Affected Devices: Qualcomm/Adreno
 		// Started Version: 14
-		// Ended Version: 53
+		// Ended Version: 95
 		// Accessing UBO array members dynamically causes the Adreno shader compiler to crash
 		// Errors out with "Internal Error"
-		// With v53 video drivers, dynamic member access works. But there is a new bug
-		// The only time we access UBO array members dynamically is with a conversion
-		// int posmtx = int(fposmtx);
-		// This line will will posmtx with a seemingly random number and cause issues.
-		// Bug still active with v53 until we switch to using integers for the fposmtx attribute
+		// With v53 video drivers, dynamic member access "works." It works to the extent that it doesn't crash.
+		// With v95 drivers everything works as it should.
 		BUG_NODYNUBOACCESS = 0,
 		// Bug: Centroid is broken in shaders
 		// Affected devices: Qualcomm/Adreno
@@ -102,10 +97,10 @@ namespace DriverDetails
 		// Started Version: ?
 		// Ended Version: 13.9 working for me (neobrain).
 		// Affected OS: Linux
-		// Pinned memory is disabled for index buffer as the amd driver (the only one with pinned memory support) seems
+		// Pinned memory is disabled for index buffer as the AMD driver (the only one with pinned memory support) seems
 		// to be broken. We just get flickering/black rendering when using pinned memory here -- degasus - 2013/08/20
 		// This bug only happens when paired with base_vertex.
-		// Please see issue #6105 on google code. Let's hope buffer storage solves this issues.
+		// Please see issue #6105 on Google Code. Let's hope buffer storage solves this issues.
 		// TODO: Detect broken drivers.
 		BUG_BROKENPINNEDMEMORY,
 		// Bug: Entirely broken UBOs
@@ -139,7 +134,7 @@ namespace DriverDetails
 		// If a shader includes a textureSize function call then the shader compiler will call abort()
 		BUG_BROKENTEXTURESIZE,
 		// Bug: ARB_buffer_storage doesn't work with ARRAY_BUFFER type streams
-		// Affected devices: Geforce 4xx+
+		// Affected devices: GeForce 4xx+
 		// Started Version: -1
 		// Ended Version: 332.21
 		// The buffer_storage streaming method is required for greater speed gains in our buffer streaming
@@ -155,25 +150,89 @@ namespace DriverDetails
 		// Intel HD 4000 series isn't affected by the bug
 		BUG_PRIMITIVERESTART,
 		// Bug: unsync mapping doesn't work fine
-		// Affected devices: nvidia driver
+		// Affected devices: Nvidia driver
 		// Started Version: -1
 		// Ended Version: -1
-		// The nvidia driver (both windows + linux) doesn't like unsync mapping performance wise.
-		// Because of their threaded behavoir, they seem not to handle unsync mapping complete unsync,
+		// The Nvidia driver (both Windows + Linux) doesn't like unsync mapping performance wise.
+		// Because of their threaded behavior, they seem not to handle unsync mapping complete unsync,
 		// in fact, they serialize the driver which adds a much bigger overhead.
 		// Workaround: Use BufferSubData
-		// TODO: some windows AMD driver/gpu combination seems also affected
+		// TODO: some Windows AMD driver/GPU combination seems also affected
 		//       but as they all support pinned memory, it doesn't matter
 		BUG_BROKENUNSYNCMAPPING,
-		// Bug: Adreno now rotates the framebuffer on blit a full 180 degrees
+		// Bug: Intel's Window driver broke buffer_storage with GL_ELEMENT_ARRAY_BUFFER
+		// Affected devices: Intel (Windows)
+		// Started Version: 15.36.3.64.3907 (10.18.10.3907)
+		// Ended Version: 15.36.7.64.3960 (10.18.10.3960)
+		// Intel implemented buffer_storage in their GL 4.3 driver.
+		// It works for all the buffer types we use except GL_ELEMENT_ARRAY_BUFFER.
+		// Causes complete blackscreen issues.
+		BUG_INTELBROKENBUFFERSTORAGE,
+		// Bug: Qualcomm has broken attributeless rendering
 		// Affected devices: Adreno
-		// Started Version: v53 (dev drivers)
+		// Started Version: -1
+		// Ended Version: v66 (07-09-2014 dev version), v95 shipping
+		// Qualcomm has had attributeless rendering broken forever
+		// This was fixed in a v66 development version, the first shipping driver version with the release was v95.
+		// To be safe, make v95 the minimum version to work around this issue
+		BUG_BROKENATTRIBUTELESS,
+		// Bug: Qualcomm has broken boolean negation
+		// Affected devices: Adreno
+		// Started Version: -1
 		// Ended Version: -1
-		// Qualcomm is a super pro company that has recently updated their development drivers
-		// These drivers are available to the Nexus 5 and report as v53
-		// Qualcomm in their infinite wisdom thought it was a good idea to rotate the framebuffer 180 degrees on glBlit
-		// This bug allows us to work around that rotation by rotating it the right way around again.
-		BUG_ROTATEDFRAMEBUFFER,
+		// Qualcomm has the boolean negation broken in their shader compiler
+		// Instead of inverting the boolean value it does a binary negation on the full 32bit register
+		// This causes a compare against zero to fail in their shader since it is no longer a 0 or 1 value
+		// but 0xFFFFFFFF or 0xFFFFFFFE depending on what the boolean value was before the negation.
+		//
+		// This bug has a secondary issue tied to it unlike other bugs.
+		// The correction of this bug is to check the boolean value against false which results in us
+		// not doing a negation of the source but instead checking against the boolean value we want.
+		// The issue with this is that Intel's Window driver is broken when checking if a boolean value is
+		// equal to true or false, so one has to do a boolean negation of the source
+		//
+		// eg.
+		// Broken on Qualcomm
+		// Works on Windows Intel
+		// if (!cond)
+		//
+		// Works on Qualcomm
+		// Broken on Windows Intel
+		// if (cond == false)
+		BUG_BROKENNEGATEDBOOLEAN,
+
+		// Bug: Qualcomm has broken ivec to scalar and ivec to ivec bitshifts
+		// Affected devices: Adreno
+		// Started Version: -1
+		// Ended Version: 46 (TODO: Test more devices, the real end is currently unknown)
+		// Qualcomm has broken integer vector to integer bitshifts, and integer vector to integer vector bitshifts
+		// A compilation error is generated when trying to compile the shaders.
+		//
+		// For example:
+		//	Broken on Qualcomm:
+		//		ivec4 ab = ivec4(1,1,1,1);
+		//		ab <<= 2;
+		//
+		//	Working on Qualcomm:
+		//		ivec4 ab = ivec4(1,1,1,1);
+		//		ab.x <<= 2;
+		//		ab.y <<= 2;
+		//		ab.z <<= 2;
+		//		ab.w <<= 2;
+		//
+		//	Broken on Qualcomm:
+		//		ivec4 ab = ivec4(1,1,1,1);
+		//		ivec4 cd = ivec4(1,2,3,4);
+		//		ab <<= cd;
+		//
+		//	Working on Qualcomm:
+		//		ivec4 ab = ivec4(1,1,1,1);
+		//		ivec4 cd = ivec4(1,2,3,4);
+		//		ab.x <<= cd.x;
+		//		ab.y <<= cd.y;
+		//		ab.z <<= cd.z;
+		//		ab.w <<= cd.w;
+		BUG_BROKENIVECSHIFTS,
 	};
 
 	// Initializes our internal vendor, device family, and driver version

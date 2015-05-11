@@ -4,6 +4,7 @@
 
 #include "Core/Core.h"
 #include "Core/HW/Memmap.h"
+#include "VideoBackends/OGL/GLInterfaceBase.h"
 #include "VideoBackends/Software/BPMemLoader.h"
 #include "VideoBackends/Software/DebugUtil.h"
 #include "VideoBackends/Software/EfbCopy.h"
@@ -44,12 +45,12 @@ namespace EfbCopy
 			else
 			{
 				// Ask SWRenderer for the next color texture
-				u8 *colorTexture = SWRenderer::getNextColorTexture();
+				u8 *colorTexture = SWRenderer::GetNextColorTexture();
 
 				EfbInterface::BypassXFB(colorTexture, fbWidth, fbHeight, sourceRc, Gamma);
 
 				// Tell SWRenderer we are now finished with it.
-				SWRenderer::swapColorTexture();
+				SWRenderer::SwapColorTexture();
 
 				// FifoPlayer is broken and never calls BeginFrame/EndFrame.
 				// Hence, we manually force a swap now. This emulates the behavior

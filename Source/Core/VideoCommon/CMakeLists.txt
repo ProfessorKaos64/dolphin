@@ -1,4 +1,6 @@
-set(SRCS	BPFunctions.cpp
+set(SRCS	AsyncRequests.cpp
+			BoundingBox.cpp
+			BPFunctions.cpp
 			BPMemory.cpp
 			BPStructs.cpp
 			CPMemory.cpp
@@ -8,6 +10,8 @@ set(SRCS	BPFunctions.cpp
 			Fifo.cpp
 			FPSCounter.cpp
 			FramebufferManagerBase.cpp
+			GeometryShaderGen.cpp
+			GeometryShaderManager.cpp
 			HiresTextures.cpp
 			ImageWrite.cpp
 			IndexGenerator.cpp
@@ -18,11 +22,14 @@ set(SRCS	BPFunctions.cpp
 			PixelEngine.cpp
 			PixelShaderGen.cpp
 			PixelShaderManager.cpp
+			PostProcessing.cpp
 			RenderBase.cpp
 			Statistics.cpp
 			TextureCacheBase.cpp
 			TextureConversionShader.cpp
+			TextureDecoder_Common.cpp
 			VertexLoader.cpp
+			VertexLoaderBase.cpp
 			VertexLoaderManager.cpp
 			VertexLoader_Color.cpp
 			VertexLoader_Normal.cpp
@@ -39,16 +46,11 @@ set(SRCS	BPFunctions.cpp
 set(LIBS core png)
 
 if(_M_X86)
-	set(SRCS ${SRCS}	TextureDecoder_x64.cpp)
+	set(SRCS ${SRCS} TextureDecoder_x64.cpp VertexLoaderX64.cpp)
+elseif(_M_ARM_64)
+	set(SRCS ${SRCS} VertexLoaderARM64.cpp TextureDecoder_Generic.cpp)
 else()
-	set(SRCS ${SRCS}	TextureDecoder_Generic.cpp)
-endif()
-if(NOT ${CL} STREQUAL CL-NOTFOUND)
-	list(APPEND LIBS ${CL})
-endif()
-
-if(wxWidgets_FOUND AND WIN32)
-	set(SRCS ${SRCS} EmuWindow.cpp)
+	set(SRCS ${SRCS} TextureDecoder_Generic.cpp)
 endif()
 
 if(LIBAV_FOUND OR WIN32)
@@ -57,9 +59,8 @@ endif()
 
 add_dolphin_library(videocommon "${SRCS}" "${LIBS}")
 
-if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
 	if(LIBAV_FOUND)
 		target_link_libraries(videocommon ${LIBS} ${LIBAV_LIBRARIES})
-		add_definitions(-D__STDC_CONSTANT_MACROS)
 	endif()
 endif()

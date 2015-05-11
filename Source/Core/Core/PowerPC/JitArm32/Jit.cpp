@@ -5,7 +5,7 @@
 #include <map>
 
 #include "Common/ArmEmitter.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
@@ -23,9 +23,6 @@
 #include "Core/PowerPC/JitArm32/JitArm_Tables.h"
 
 using namespace ArmGen;
-using namespace PowerPC;
-
-static int CODE_SIZE = 1024*1024*32;
 
 void JitArm::Init()
 {
@@ -36,17 +33,20 @@ void JitArm::Init()
 	fpr.Init(this);
 	jo.enableBlocklink = true;
 	jo.optimizeGatherPipe = true;
+	UpdateMemoryOptions();
 
 	code_block.m_stats = &js.st;
 	code_block.m_gpa = &js.gpa;
 	code_block.m_fpa = &js.fpa;
 	analyzer.SetOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE);
+	InitBackpatch();
 }
 
 void JitArm::ClearCache()
 {
 	ClearCodeSpace();
 	blocks.Clear();
+	UpdateMemoryOptions();
 }
 
 void JitArm::Shutdown()
@@ -65,10 +65,6 @@ void JitArm::WriteCallInterpreter(UGeckoInstruction inst)
 	MOVI2R(R0, inst.hex);
 	MOVI2R(R12, (u32)instr);
 	BL(R12);
-}
-void JitArm::unknown_instruction(UGeckoInstruction inst)
-{
-	PanicAlert("unknown_instruction %08x - Fix me ;)", inst.hex);
 }
 
 void JitArm::FallBackToInterpreter(UGeckoInstruction _inst)
@@ -108,12 +104,14 @@ static void ImHere()
 		}
 		fprintf(f.GetHandle(), "%08x\n", PC);
 	}
+
 	if (been_here.find(PC) != been_here.end())
 	{
 		been_here.find(PC)->second++;
 		if ((been_here.find(PC)->second) & 1023)
 			return;
 	}
+
 	DEBUG_LOG(DYNA_REC, "I'm here - PC = %08x , LR = %08x", PC, LR);
 	been_here[PC] = 1;
 }
@@ -123,7 +121,7 @@ void JitArm::Cleanup()
 	if (jo.optimizeGatherPipe && js.fifoBytesThisBlock > 0)
 	{
 		PUSH(4, R0, R1, R2, R3);
-		QuickCallFunction(R14, (void*)&GPFifo::CheckGatherPipe);
+		QuickCallFunction(R14, (void*)&GPFifo::FastCheckGatherPipe);
 		POP(4, R0, R1, R2, R3);
 	}
 }
@@ -149,6 +147,10 @@ void JitArm::WriteExitDestInR(ARMReg Reg)
 	STR(Reg, R9, PPCSTATE_OFF(pc));
 	Cleanup();
 	DoDownCount();
+
+	if (Profiler::g_ProfileBlocks)
+		EndTimeProfile(js.curBlock);
+
 	MOVI2R(Reg, (u32)asm_routines.dispatcher);
 	B(Reg);
 	gpr.Unlock(Reg);
@@ -158,6 +160,9 @@ void JitArm::WriteRfiExitDestInR(ARMReg Reg)
 	STR(Reg, R9, PPCSTATE_OFF(pc));
 	Cleanup();
 	DoDownCount();
+
+	if (Profiler::g_ProfileBlocks)
+		EndTimeProfile(js.curBlock);
 
 	ARMReg A = gpr.GetReg(false);
 
@@ -176,6 +181,9 @@ void JitArm::WriteExceptionExit()
 	Cleanup();
 	DoDownCount();
 
+	if (Profiler::g_ProfileBlocks)
+		EndTimeProfile(js.curBlock);
+
 	ARMReg A = gpr.GetReg(false);
 
 	LDR(A, R9, PPCSTATE_OFF(pc));
@@ -192,6 +200,10 @@ void JitArm::WriteExit(u32 destination)
 	Cleanup();
 
 	DoDownCount();
+
+	if (Profiler::g_ProfileBlocks)
+		EndTimeProfile(js.curBlock);
+
 	//If nobody has taken care of this yet (this can be removed when all branches are done)
 	JitBlock *b = js.curBlock;
 	JitBlock::LinkData linkData;
@@ -219,7 +231,7 @@ void JitArm::WriteExit(u32 destination)
 	b->linkData.push_back(linkData);
 }
 
-void STACKALIGN JitArm::Run()
+void JitArm::Run()
 {
 	CompiledCode pExecAddr = (CompiledCode)asm_routines.enterCode;
 	pExecAddr();
@@ -254,36 +266,9 @@ void JitArm::Trace()
 		PC, SRR0, SRR1, PowerPC::ppcState.fpscr, PowerPC::ppcState.msr, PowerPC::ppcState.spr[8], regs.c_str(), fregs.c_str());
 }
 
-void JitArm::PrintDebug(UGeckoInstruction inst, u32 level)
+void JitArm::Jit(u32 em_address)
 {
-	if (level > 0)
-		WARN_LOG(DYNA_REC, "Start: %08x OP '%s' Info", (u32)GetCodePtr(),  PPCTables::GetInstructionName(inst));
-	if (level > 1)
-	{
-		GekkoOPInfo* Info = GetOpInfo(inst.hex);
-		WARN_LOG(DYNA_REC, "\tOuts");
-		if (Info->flags & FL_OUT_A)
-			WARN_LOG(DYNA_REC, "\t-OUT_A: %x", inst.RA);
-		if (Info->flags & FL_OUT_D)
-			WARN_LOG(DYNA_REC, "\t-OUT_D: %x", inst.RD);
-		WARN_LOG(DYNA_REC, "\tIns");
-		// A, AO, B, C, S
-		if (Info->flags & FL_IN_A)
-			WARN_LOG(DYNA_REC, "\t-IN_A: %x", inst.RA);
-		if (Info->flags & FL_IN_A0)
-			WARN_LOG(DYNA_REC, "\t-IN_A0: %x", inst.RA);
-		if (Info->flags & FL_IN_B)
-			WARN_LOG(DYNA_REC, "\t-IN_B: %x", inst.RB);
-		if (Info->flags & FL_IN_C)
-			WARN_LOG(DYNA_REC, "\t-IN_C: %x", inst.RC);
-		if (Info->flags & FL_IN_S)
-			WARN_LOG(DYNA_REC, "\t-IN_S: %x", inst.RS);
-	}
-}
-
-void STACKALIGN JitArm::Jit(u32 em_address)
-{
-	if (GetSpaceLeft() < 0x10000 || blocks.IsFull() || Core::g_CoreStartupParameter.bJITNoBlockCache)
+	if (GetSpaceLeft() < 0x10000 || blocks.IsFull() || SConfig::GetInstance().m_LocalCoreStartupParameter.bJITNoBlockCache)
 	{
 		ClearCache();
 	}
@@ -299,15 +284,77 @@ void JitArm::Break(UGeckoInstruction inst)
 	BKPT(0x4444);
 }
 
+void JitArm::BeginTimeProfile(JitBlock* b)
+{
+	b->ticCounter = 0;
+	b->ticStart = 0;
+	b->ticStop = 0;
+
+	// Performance counters are bit finnicky on ARM
+	// We must first enable and program the PMU before using it
+	// This is a per core operation so with thread scheduling we may jump to a core we haven't enabled PMU yet
+	// Work around this by enabling PMU each time at the start of a block
+	// Some ARM CPUs are getting absurd core counts(48+!)
+	// We have to reset counters at the start of every block anyway, so may as well.
+	// One thing to note about performance counters on ARM
+	// The kernel can block access to these co-processor registers
+	// In the case that this happens, these will generate a SIGILL
+
+	// Refer to the ARM ARM about PMCR for what these do exactly
+	enum
+	{
+		PERF_OPTION_ENABLE = (1 << 0),
+		PERF_OPTION_RESET_CR = (1 << 1),
+		PERF_OPTION_RESET_CCR = (1 << 2),
+		PERF_OPTION_DIVIDER_MODE = (1 << 3),
+		PERF_OPTION_EXPORT_ENABLE = (1 << 4),
+	};
+	const u32 perf_options =
+		PERF_OPTION_ENABLE |
+		PERF_OPTION_RESET_CR |
+		PERF_OPTION_RESET_CCR |
+		PERF_OPTION_EXPORT_ENABLE;
+	MOVI2R(R0, perf_options);
+	// Programs the PMCR
+	MCR(15, 0, R0, 9, 12, 0);
+
+	MOVI2R(R0, 0x8000000F);
+	// Enables all counters
+	MCR(15, 0, R0, 9, 12, 1);
+	// Clears all counter overflows
+	MCR(15, 0, R0, 9, 12, 3);
+
+	// Gets the cycle counter
+	MRC(15, 0, R1, 9, 13, 0);
+	MOVI2R(R0, (u32)&b->ticStart);
+	STR(R1, R0, 0);
+}
+
+void JitArm::EndTimeProfile(JitBlock* b)
+{
+	// Gets the cycle counter
+	MRC(15, 0, R1, 9, 13, 0);
+	MOVI2R(R0, (u32)&b->ticStop);
+	STR(R1, R0, 0);
+
+	MOVI2R(R0, (u32)&b->ticStart);
+	MOVI2R(R14, (u32)asm_routines.m_increment_profile_counter);
+	BL(R14);
+}
+
 const u8* JitArm::DoJit(u32 em_address, PPCAnalyst::CodeBuffer *code_buf, JitBlock *b)
 {
 	int blockSize = code_buf->GetSize();
 
-	if (Core::g_CoreStartupParameter.bEnableDebugging)
+	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bEnableDebugging)
 	{
 		// Comment out the following to disable breakpoints (speed-up)
-		blockSize = 1;
-		Trace();
+		if (!Profiler::g_ProfileBlocks)
+		{
+			if (PowerPC::GetState() == PowerPC::CPU_STEPPING)
+				blockSize = 1;
+			Trace();
+		}
 	}
 
 	if (em_address == 0)
@@ -334,13 +381,13 @@ const u8* JitArm::DoJit(u32 em_address, PPCAnalyst::CodeBuffer *code_buf, JitBlo
 
 	// Downcount flag check, Only valid for linked blocks
 	{
-		SetCC(CC_MI);
+		FixupBranch no_downcount = B_CC(CC_PL);
 		ARMReg rA = gpr.GetReg(false);
 		MOVI2R(rA, js.blockStart);
 		STR(rA, R9, PPCSTATE_OFF(pc));
 		MOVI2R(rA, (u32)asm_routines.doTiming);
 		B(rA);
-		SetCC();
+		SetJumpTarget(no_downcount);
 	}
 
 	const u8 *normalEntry = GetCodePtr();
@@ -358,7 +405,7 @@ const u8* JitArm::DoJit(u32 em_address, PPCAnalyst::CodeBuffer *code_buf, JitBlo
 		MOVI2R(C, js.blockStart); // R3
 		LDR(A, R9, PPCSTATE_OFF(msr));
 		TST(A, Shift);
-		SetCC(CC_EQ);
+		FixupBranch no_fpe = B_CC(CC_NEQ);
 		STR(C, R9, PPCSTATE_OFF(pc));
 
 		LDR(A, R9, PPCSTATE_OFF(Exceptions));
@@ -371,35 +418,31 @@ const u8* JitArm::DoJit(u32 em_address, PPCAnalyst::CodeBuffer *code_buf, JitBlo
 		MOVI2R(A, (u32)asm_routines.dispatcher);
 		B(A);
 
-		SetCC();
+		SetJumpTarget(no_fpe);
 		gpr.Unlock(A, C);
 	}
+
 	// Conditionally add profiling code.
-	if (Profiler::g_ProfileBlocks) {
+	if (Profiler::g_ProfileBlocks)
+	{
 		ARMReg rA = gpr.GetReg();
 		ARMReg rB = gpr.GetReg();
 		MOVI2R(rA, (u32)&b->runCount); // Load in to register
 		LDR(rB, rA); // Load the actual value in to R11.
 		ADD(rB, rB, 1); // Add one to the value
 		STR(rB, rA); // Now store it back in the memory location
-		// get start tic
-		PROFILER_QUERY_PERFORMANCE_COUNTER(&b->ticStart);
+		BeginTimeProfile(b);
 		gpr.Unlock(rA, rB);
 	}
 	gpr.Start(js.gpa);
 	fpr.Start(js.fpa);
 	js.downcountAmount = 0;
 
-	if (!Core::g_CoreStartupParameter.bEnableDebugging)
+	if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bEnableDebugging)
 		js.downcountAmount += PatchEngine::GetSpeedhackCycles(em_address);
 
-	js.skipnext = false;
+	js.skipInstructions = 0;
 	js.compilerPC = nextPC;
-
-	const int DEBUG_OUTPUT = 0;
-
-	if (DEBUG_OUTPUT)
-		WARN_LOG(DYNA_REC, "-------0x%08x-------", em_address);
 
 	// Translate instructions
 	for (u32 i = 0; i < code_block.m_num_instructions; i++)
@@ -414,66 +457,39 @@ const u8* JitArm::DoJit(u32 em_address, PPCAnalyst::CodeBuffer *code_buf, JitBlo
 		{
 			// WARNING - cmp->branch merging will screw this up.
 			js.isLastInstruction = true;
-			js.next_inst = 0;
-			if (Profiler::g_ProfileBlocks) {
-				// CAUTION!!! push on stack regs you use, do your stuff, then pop
-				PROFILER_VPUSH;
-				// get end tic
-				PROFILER_QUERY_PERFORMANCE_COUNTER(&b->ticStop);
-				// tic counter += (end tic - start tic)
-				PROFILER_ADD_DIFF_LARGE_INTEGER(&b->ticCounter, &b->ticStop, &b->ticStart);
-				PROFILER_VPOP;
-			}
 		}
-		else
-		{
-			// help peephole optimizations
-			js.next_inst = ops[i + 1].inst;
-			js.next_compilerPC = ops[i + 1].address;
-		}
+
 		if (jo.optimizeGatherPipe && js.fifoBytesThisBlock >= 32)
 		{
 			js.fifoBytesThisBlock -= 32;
 			PUSH(4, R0, R1, R2, R3);
-			QuickCallFunction(R14, (void*)&GPFifo::CheckGatherPipe);
+			QuickCallFunction(R14, (void*)&GPFifo::FastCheckGatherPipe);
 			POP(4, R0, R1, R2, R3);
 		}
-		if (Core::g_CoreStartupParameter.bEnableDebugging)
-		{
-			// Add run count
-			static const u64 One = 1;
-			ARMReg RA = gpr.GetReg();
-			ARMReg RB = gpr.GetReg();
-			ARMReg VA = fpr.GetReg();
-			ARMReg VB = fpr.GetReg();
-			MOVI2R(RA, (u32)&opinfo->runCount);
-			MOVI2R(RB, (u32)&One);
-			VLDR(VA, RA, 0);
-			VLDR(VB, RB, 0);
-			NEONXEmitter nemit(this);
-			nemit.VADD(I_64, VA, VA, VB);
-			VSTR(VA, RA, 0);
-			gpr.Unlock(RA, RB);
-			fpr.Unlock(VA);
-			fpr.Unlock(VB);
-		}
+
 		if (!ops[i].skip)
 		{
-				PrintDebug(ops[i].inst, DEBUG_OUTPUT);
-				if (js.memcheck && (opinfo->flags & FL_USE_FPU))
+				if (jo.memcheck && (opinfo->flags & FL_USE_FPU))
 				{
 					// Don't do this yet
 					BKPT(0x7777);
 				}
 				JitArmTables::CompileInstruction(ops[i]);
-				fpr.Flush();
-				if (js.memcheck && (opinfo->flags & FL_LOADSTORE))
+
+				// If we have a register that will never be used again, flush it.
+				for (int j : ~ops[i].gprInUse)
+					gpr.StoreFromRegister(j);
+				for (int j : ~ops[i].fprInUse)
+					fpr.StoreFromRegister(j);
+
+				if (jo.memcheck && (opinfo->flags & FL_LOADSTORE))
 				{
 					// Don't do this yet
 					BKPT(0x666);
 				}
 		}
 	}
+
 	if (code_block.m_memory_exception)
 		BKPT(0x500);
 
@@ -488,4 +504,3 @@ const u8* JitArm::DoJit(u32 em_address, PPCAnalyst::CodeBuffer *code_buf, JitBlo
 	FlushIcache();
 	return start;
 }
-

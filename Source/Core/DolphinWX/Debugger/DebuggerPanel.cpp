@@ -5,43 +5,20 @@
 #include <cstddef>
 #include <string>
 #include <wx/button.h>
-#include <wx/chartype.h>
 #include <wx/choice.h>
-#include <wx/defs.h>
-#include <wx/event.h>
-#include <wx/gdicmn.h>
 #include <wx/msgdlg.h>
 #include <wx/panel.h>
 #include <wx/sizer.h>
-#include <wx/string.h>
 #include <wx/textctrl.h>
-#include <wx/translation.h>
-#include <wx/validate.h>
-#include <wx/windowid.h>
 
 #include "Common/FileUtil.h"
 #include "Common/IniFile.h"
 #include "Core/ConfigManager.h"
 #include "Core/CoreParameter.h"
+#include "DolphinWX/WxUtils.h"
 #include "DolphinWX/Debugger/DebuggerPanel.h"
 #include "VideoCommon/Debugger.h"
 #include "VideoCommon/TextureCacheBase.h"
-
-class wxWindow;
-
-BEGIN_EVENT_TABLE(GFXDebuggerPanel, wxPanel)
-	EVT_CLOSE(GFXDebuggerPanel::OnClose)
-	EVT_BUTTON(ID_PAUSE,GFXDebuggerPanel::OnPauseButton)
-	EVT_BUTTON(ID_PAUSE_AT_NEXT,GFXDebuggerPanel::OnPauseAtNextButton)
-	EVT_BUTTON(ID_PAUSE_AT_NEXT_FRAME,GFXDebuggerPanel::OnPauseAtNextFrameButton)
-	EVT_BUTTON(ID_CONT,GFXDebuggerPanel::OnContButton)
-	EVT_BUTTON(ID_DUMP,GFXDebuggerPanel::OnDumpButton)
-	EVT_BUTTON(ID_UPDATE_SCREEN,GFXDebuggerPanel::OnUpdateScreenButton)
-	EVT_BUTTON(ID_CLEAR_SCREEN,GFXDebuggerPanel::OnClearScreenButton)
-	EVT_BUTTON(ID_CLEAR_TEXTURE_CACHE,GFXDebuggerPanel::OnClearTextureCacheButton)
-	EVT_BUTTON(ID_CLEAR_VERTEX_SHADER_CACHE,GFXDebuggerPanel::OnClearVertexShaderCacheButton)
-	EVT_BUTTON(ID_CLEAR_PIXEL_SHADER_CACHE,GFXDebuggerPanel::OnClearPixelShaderCacheButton)
-END_EVENT_TABLE()
 
 GFXDebuggerPanel::GFXDebuggerPanel(wxWindow *parent, wxWindowID id, const wxPoint &position,
 									const wxSize& size, long style, const wxString &title)
@@ -50,6 +27,8 @@ GFXDebuggerPanel::GFXDebuggerPanel(wxWindow *parent, wxWindowID id, const wxPoin
 	g_pdebugger = this;
 
 	CreateGUIControls();
+
+	Bind(wxEVT_CLOSE_WINDOW, &GFXDebuggerPanel::OnClose, this);
 
 	LoadSettings();
 }
@@ -149,28 +128,46 @@ void GFXDebuggerPanel::CreateGUIControls()
 	// Basic settings
 	CenterOnParent();
 
-	m_pButtonPause = new wxButton(this, ID_PAUSE, _("Pause"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Pause"));
-	m_pButtonPauseAtNext = new wxButton(this, ID_PAUSE_AT_NEXT, _("Pause After"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Pause At Next"));
-	m_pButtonPauseAtNextFrame = new wxButton(this, ID_PAUSE_AT_NEXT_FRAME, _("Go to Next Frame"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Next Frame"));
-	m_pButtonCont = new wxButton(this, ID_CONT, _("Continue"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Continue"));
+	m_pButtonPause = new wxButton(this, wxID_ANY, _("Pause"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Pause"));
+	m_pButtonPause->Bind(wxEVT_BUTTON, &GFXDebuggerPanel::OnPauseButton, this);
 
-	m_pCount = new wxTextCtrl(this, ID_COUNT, "1", wxDefaultPosition, wxSize(50,25), wxTE_RIGHT, wxDefaultValidator, _("Count"));
+	m_pButtonPauseAtNext = new wxButton(this, wxID_ANY, _("Pause After"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Pause At Next"));
+	m_pButtonPauseAtNext->Bind(wxEVT_BUTTON, &GFXDebuggerPanel::OnPauseAtNextButton, this);
 
-	m_pPauseAtList = new wxChoice(this, ID_PAUSE_AT_LIST, wxDefaultPosition, wxSize(100,25), 0, nullptr,0,wxDefaultValidator, _("PauseAtList"));
+	m_pButtonPauseAtNextFrame = new wxButton(this, wxID_ANY, _("Go to Next Frame"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Next Frame"));
+	m_pButtonPauseAtNextFrame->Bind(wxEVT_BUTTON, &GFXDebuggerPanel::OnPauseAtNextFrameButton, this);
+
+	m_pButtonCont = new wxButton(this, wxID_ANY, _("Continue"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Continue"));
+	m_pButtonCont->Bind(wxEVT_BUTTON, &GFXDebuggerPanel::OnContButton, this);
+
+	m_pCount = new wxTextCtrl(this, wxID_ANY, "1", wxDefaultPosition, wxSize(50,25), wxTE_RIGHT, wxDefaultValidator, _("Count"));
+
+	m_pPauseAtList = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxSize(100,25), 0, nullptr,0,wxDefaultValidator, _("PauseAtList"));
 	for (int i=0; i<numPauseEventMap; i++)
 	{
 		m_pPauseAtList->Append(pauseEventMap[i].ListStr);
 	}
 	m_pPauseAtList->SetSelection(0);
 
-	m_pButtonDump = new wxButton(this, ID_DUMP, _("Dump"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Dump"));
-	m_pButtonUpdateScreen = new wxButton(this, ID_UPDATE_SCREEN, _("Update Screen"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Update Screen"));
-	m_pButtonClearScreen = new wxButton(this, ID_CLEAR_SCREEN, _("Clear Screen"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Clear Screen"));
-	m_pButtonClearTextureCache = new wxButton(this, ID_CLEAR_TEXTURE_CACHE, _("Clear Textures"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Clear Textures"));
-	m_pButtonClearVertexShaderCache = new wxButton(this, ID_CLEAR_VERTEX_SHADER_CACHE, _("Clear V Shaders"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Clear V Shaders"));
-	m_pButtonClearPixelShaderCache = new wxButton(this, ID_CLEAR_PIXEL_SHADER_CACHE, _("Clear P Shaders"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Clear P Shaders"));
+	m_pButtonDump = new wxButton(this, wxID_ANY, _("Dump"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Dump"));
+	m_pButtonDump->Bind(wxEVT_BUTTON, &GFXDebuggerPanel::OnDumpButton, this);
 
-	m_pDumpList = new wxChoice(this, ID_DUMP_LIST, wxDefaultPosition, wxSize(120,25), 0, nullptr, 0 ,wxDefaultValidator, _("DumpList"));
+	m_pButtonUpdateScreen = new wxButton(this, wxID_ANY, _("Update Screen"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Update Screen"));
+	m_pButtonUpdateScreen->Bind(wxEVT_BUTTON, &GFXDebuggerPanel::OnUpdateScreenButton, this);
+
+	m_pButtonClearScreen = new wxButton(this, wxID_ANY, _("Clear Screen"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Clear Screen"));
+	m_pButtonClearScreen->Bind(wxEVT_BUTTON, &GFXDebuggerPanel::OnClearScreenButton, this);
+
+	m_pButtonClearTextureCache = new wxButton(this, wxID_ANY, _("Clear Textures"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Clear Textures"));
+	m_pButtonClearTextureCache->Bind(wxEVT_BUTTON, &GFXDebuggerPanel::OnClearTextureCacheButton, this);
+
+	m_pButtonClearVertexShaderCache = new wxButton(this, wxID_ANY, _("Clear V Shaders"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Clear V Shaders"));
+	m_pButtonClearVertexShaderCache->Bind(wxEVT_BUTTON, &GFXDebuggerPanel::OnClearVertexShaderCacheButton, this);
+
+	m_pButtonClearPixelShaderCache = new wxButton(this, wxID_ANY, _("Clear P Shaders"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _("Clear P Shaders"));
+	m_pButtonClearPixelShaderCache->Bind(wxEVT_BUTTON, &GFXDebuggerPanel::OnClearPixelShaderCacheButton, this);
+
+	m_pDumpList = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxSize(120,25), 0, nullptr, 0 ,wxDefaultValidator, _("DumpList"));
 	m_pDumpList->Insert(_("Pixel Shader"),0);
 	m_pDumpList->Append(_("Vertex Shader"));
 	m_pDumpList->Append(_("Pixel Shader Constants"));
@@ -218,24 +215,24 @@ void GFXDebuggerPanel::CreateGUIControls()
 
 void GFXDebuggerPanel::OnPause()
 {
-	m_pButtonDump->Enable(true);
-	m_pDumpList->Enable(true);
-	m_pButtonUpdateScreen->Enable(true);
-	m_pButtonClearScreen->Enable(true);
-	m_pButtonClearTextureCache->Enable(true);
-	m_pButtonClearVertexShaderCache->Enable(true);
-	m_pButtonClearPixelShaderCache->Enable(true);
+	m_pButtonDump->Enable();
+	m_pDumpList->Enable();
+	m_pButtonUpdateScreen->Enable();
+	m_pButtonClearScreen->Enable();
+	m_pButtonClearTextureCache->Enable();
+	m_pButtonClearVertexShaderCache->Enable();
+	m_pButtonClearPixelShaderCache->Enable();
 }
 
 void GFXDebuggerPanel::OnContinue()
 {
-	m_pButtonDump->Enable(false);
-	m_pDumpList->Enable(false);
-	m_pButtonUpdateScreen->Enable(false);
-	m_pButtonClearScreen->Enable(false);
-	m_pButtonClearTextureCache->Enable(false);
-	m_pButtonClearVertexShaderCache->Enable(false);
-	m_pButtonClearPixelShaderCache->Enable(false);
+	m_pButtonDump->Disable();
+	m_pDumpList->Disable();
+	m_pButtonUpdateScreen->Disable();
+	m_pButtonClearScreen->Disable();
+	m_pButtonClearTextureCache->Disable();
+	m_pButtonClearVertexShaderCache->Disable();
+	m_pButtonClearPixelShaderCache->Disable();
 }
 
 
@@ -288,42 +285,42 @@ void GFXDebuggerPanel::OnDumpButton(wxCommandEvent& event)
 
 		case 2: // Pixel Shader Constants
 			DumpPixelShaderConstants(dump_path);
-			wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+			WxUtils::ShowErrorDialog(_("Not implemented"));
 			break;
 
 		case 3: // Vertex Shader Constants
 			DumpVertexShaderConstants(dump_path);
-			wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+			WxUtils::ShowErrorDialog(_("Not implemented"));
 			break;
 
 		case 4: // Textures
 			DumpTextures(dump_path);
-			wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+			WxUtils::ShowErrorDialog(_("Not implemented"));
 			break;
 
 		case 5: // Frame Buffer
 			DumpFrameBuffer(dump_path);
-			wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+			WxUtils::ShowErrorDialog(_("Not implemented"));
 			break;
 
 		case 6: // Geometry
 			DumpGeometry(dump_path);
-			wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+			WxUtils::ShowErrorDialog(_("Not implemented"));
 			break;
 
 		case 7: // Vertex Description
 			DumpVertexDecl(dump_path);
-			wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+			WxUtils::ShowErrorDialog(_("Not implemented"));
 			break;
 
 		case 8: // Vertex Matrices
 			DumpMatrices(dump_path);
-			wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+			WxUtils::ShowErrorDialog(_("Not implemented"));
 			break;
 
 		case 9: // Statistics
 			DumpStats(dump_path);
-			wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+			WxUtils::ShowErrorDialog(_("Not implemented"));
 			break;
 	}
 }
@@ -337,7 +334,7 @@ void GFXDebuggerPanel::OnContButton(wxCommandEvent& event)
 void GFXDebuggerPanel::OnClearScreenButton(wxCommandEvent& event)
 {
 	// TODO
-	wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+	WxUtils::ShowErrorDialog(_("Not implemented"));
 }
 
 void GFXDebuggerPanel::OnClearTextureCacheButton(wxCommandEvent& event)
@@ -348,17 +345,17 @@ void GFXDebuggerPanel::OnClearTextureCacheButton(wxCommandEvent& event)
 void GFXDebuggerPanel::OnClearVertexShaderCacheButton(wxCommandEvent& event)
 {
 	// TODO
-	wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+	WxUtils::ShowErrorDialog(_("Not implemented"));
 }
 
 void GFXDebuggerPanel::OnClearPixelShaderCacheButton(wxCommandEvent& event)
 {
 	// TODO
-	wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+	WxUtils::ShowErrorDialog(_("Not implemented"));
 }
 
 void GFXDebuggerPanel::OnUpdateScreenButton(wxCommandEvent& event)
 {
-	wxMessageBox(_("Not implemented"), _("Error"), wxOK);
+	WxUtils::ShowErrorDialog(_("Not implemented"));
 	GFXDebuggerUpdateScreen();
 }

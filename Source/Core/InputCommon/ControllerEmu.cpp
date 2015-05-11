@@ -38,12 +38,14 @@ void ControllerEmu::UpdateDefaultDevice()
 
 void ControllerEmu::ControlGroup::LoadConfig(IniFile::Section *sec, const std::string& defdev, const std::string& base)
 {
-	std::string group(base + name); group += "/";
+	std::string group(base + name + "/");
 
 	// settings
 	for (auto& s : settings)
 	{
 		if (s->is_virtual)
+			continue;
+		if (s->is_iterate)
 			continue;
 		sec->Get(group + s->name, &s->value, s->default_value * 100);
 		s->value /= 100;
@@ -55,7 +57,7 @@ void ControllerEmu::ControlGroup::LoadConfig(IniFile::Section *sec, const std::s
 		sec->Get(group + c->name, &c->control_ref->expression, "");
 
 		// range
-		sec->Get(group + c->name + "/Range", &c->control_ref->range, 100.0f);
+		sec->Get(group + c->name + "/Range", &c->control_ref->range, 100.0);
 		c->control_ref->range /= 100;
 
 	}
@@ -98,13 +100,16 @@ void ControllerEmu::LoadConfig(IniFile::Section *sec, const std::string& base)
 
 void ControllerEmu::ControlGroup::SaveConfig(IniFile::Section *sec, const std::string& defdev, const std::string& base)
 {
-	std::string group(base + name); group += "/";
+	std::string group(base + name + "/");
 
 	for (auto& s : settings)
 	{
 		if (s->is_virtual)
 			continue;
-		sec->Set(group + s->name, s->value*100.0f, s->default_value*100.0f);
+		if (s->is_iterate)
+			continue;
+
+		sec->Set(group + s->name, s->value * 100.0, s->default_value * 100.0);
 	}
 
 	for (auto& c : controls)
@@ -113,7 +118,7 @@ void ControllerEmu::ControlGroup::SaveConfig(IniFile::Section *sec, const std::s
 		sec->Set(group + c->name, c->control_ref->expression, "");
 
 		// range
-		sec->Set(group + c->name + "/Range", c->control_ref->range*100.0f, 100.0f);
+		sec->Set(group + c->name + "/Range", c->control_ref->range*100.0, 100.0);
 	}
 
 	// extensions
@@ -137,25 +142,25 @@ void ControllerEmu::SaveConfig(IniFile::Section *sec, const std::string& base)
 		ctrlGroup->SaveConfig(sec, defdev, base);
 }
 
-ControllerEmu::AnalogStick::AnalogStick(const char* const _name) : ControlGroup(_name, GROUP_TYPE_STICK)
+ControllerEmu::AnalogStick::AnalogStick(const char* const _name, ControlState default_radius)
+	: ControlGroup(_name, GROUP_TYPE_STICK)
 {
 	for (auto& named_direction : named_directions)
 		controls.emplace_back(new Input(named_direction));
 
 	controls.emplace_back(new Input(_trans("Modifier")));
-
-	settings.emplace_back(new Setting(_trans("Radius"), 0.7f, 0, 100));
+	settings.emplace_back(new Setting(_trans("Radius"), default_radius, 0, 100));
 	settings.emplace_back(new Setting(_trans("Dead Zone"), 0, 0, 50));
 }
 
 ControllerEmu::Buttons::Buttons(const std::string& _name) : ControlGroup(_name, GROUP_TYPE_BUTTONS)
 {
-	settings.emplace_back(new Setting(_trans("Threshold"), 0.5f));
+	settings.emplace_back(new Setting(_trans("Threshold"), 0.5));
 }
 
 ControllerEmu::MixedTriggers::MixedTriggers(const std::string& _name) : ControlGroup(_name, GROUP_TYPE_MIXED_TRIGGERS)
 {
-	settings.emplace_back(new Setting(_trans("Threshold"), 0.9f));
+	settings.emplace_back(new Setting(_trans("Threshold"), 0.9));
 }
 
 ControllerEmu::Triggers::Triggers(const std::string& _name) : ControlGroup(_name, GROUP_TYPE_TRIGGERS)
@@ -198,7 +203,7 @@ ControllerEmu::Tilt::Tilt(const std::string& _name) : ControlGroup(_name, GROUP_
 
 	settings.emplace_back(new Setting(_trans("Dead Zone"), 0, 0, 50));
 	settings.emplace_back(new Setting(_trans("Circle Stick"), 0));
-	settings.emplace_back(new Setting(_trans("Angle"), 0.9f, 0, 180));
+	settings.emplace_back(new Setting(_trans("Angle"), 0.9, 0, 180));
 }
 
 ControllerEmu::Cursor::Cursor(const std::string& _name)
@@ -211,10 +216,9 @@ ControllerEmu::Cursor::Cursor(const std::string& _name)
 	controls.emplace_back(new Input("Backward"));
 	controls.emplace_back(new Input(_trans("Hide")));
 
-	settings.emplace_back(new Setting(_trans("Center"), 0.5f));
-	settings.emplace_back(new Setting(_trans("Width"), 0.5f));
-	settings.emplace_back(new Setting(_trans("Height"), 0.5f));
-
+	settings.emplace_back(new Setting(_trans("Center"), 0.5));
+	settings.emplace_back(new Setting(_trans("Width"), 0.5));
+	settings.emplace_back(new Setting(_trans("Height"), 0.5));
 }
 
 void ControllerEmu::LoadDefaults(const ControllerInterface &ciface)

@@ -4,7 +4,7 @@
 
 #pragma once
 
-// Directory seperators, do we need this?
+// Directory separators, do we need this?
 #define DIR_SEP "/"
 #define DIR_SEP_CHR '/'
 
@@ -31,7 +31,7 @@
 	#endif
 #endif
 
-// Shared data dirs (Sys and shared User for linux)
+// Shared data dirs (Sys and shared User for Linux)
 #ifdef _WIN32
 	#define SYSDATA_DIR "Sys"
 #elif defined __APPLE__
@@ -62,7 +62,7 @@
 #define STATESAVES_DIR      "StateSaves"
 #define SCREENSHOTS_DIR     "ScreenShots"
 #define LOAD_DIR            "Load"
-#define HIRES_TEXTURES_DIR  LOAD_DIR DIR_SEP "Textures"
+#define HIRES_TEXTURES_DIR  "Textures"
 #define DUMP_DIR            "Dump"
 #define DUMP_TEXTURES_DIR   "Textures"
 #define DUMP_FRAMES_DIR     "Frames"
@@ -74,6 +74,7 @@
 #define WII_SYSCONF_DIR     "shared2" DIR_SEP "sys"
 #define WII_WC24CONF_DIR    "shared2" DIR_SEP "wc24"
 #define THEMES_DIR          "Themes"
+#define ANAGLYPH_DIR        "Anaglyph"
 
 // Filenames
 // Files in the directory returned by GetUserPath(D_CONFIG_IDX)

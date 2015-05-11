@@ -3,10 +3,6 @@
 // Refer to the license.txt file included.
 
 #include <cmath>
-#include <locale.h>
-#ifdef __APPLE__
-	#include <xlocale.h>
-#endif
 
 #include "VideoCommon/BPMemory.h"
 #include "VideoCommon/CPMemory.h"
@@ -19,67 +15,45 @@
 static char text[16768];
 
 template<class T>
-static void DefineVSOutputStructMember(T& object, API_TYPE api_type, const char* type, const char* name, int var_index, const char* semantic, int semantic_index = -1)
-{
-	object.Write("  %s %s", type, name);
-	if (var_index != -1)
-		object.Write("%d", var_index);
-
-	if (api_type == API_OPENGL)
-		object.Write(";\n");
-	else // D3D
-	{
-		if (semantic_index != -1)
-			object.Write(" : %s%d;\n", semantic, semantic_index);
-		else
-			object.Write(" : %s;\n", semantic);
-	}
-}
-
-template<class T>
-static inline void GenerateVSOutputStruct(T& object, API_TYPE api_type)
-{
-	object.Write("struct VS_OUTPUT {\n");
-	DefineVSOutputStructMember(object, api_type, "float4", "pos", -1, "POSITION");
-	DefineVSOutputStructMember(object, api_type, "float4", "colors_", 0, "COLOR", 0);
-	DefineVSOutputStructMember(object, api_type, "float4", "colors_", 1, "COLOR", 1);
-
-	for (unsigned int i = 0; i < xfmem.numTexGen.numTexGens; ++i)
-		DefineVSOutputStructMember(object, api_type, "float3", "tex", i, "TEXCOORD", i);
-
-	DefineVSOutputStructMember(object, api_type, "float4", "clipPos", -1, "TEXCOORD", xfmem.numTexGen.numTexGens);
-
-	if (g_ActiveConfig.bEnablePixelLighting)
-		DefineVSOutputStructMember(object, api_type, "float4", "Normal", -1, "TEXCOORD", xfmem.numTexGen.numTexGens + 1);
-
-	object.Write("};\n");
-}
-
-template<class T>
 static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_type)
 {
 	// Non-uid template parameters will write to the dummy data (=> gets optimized out)
 	vertex_shader_uid_data dummy_data;
-	vertex_shader_uid_data& uid_data = (&out.template GetUidData<vertex_shader_uid_data>() != nullptr)
-											? out.template GetUidData<vertex_shader_uid_data>() : dummy_data;
+	vertex_shader_uid_data* uid_data = out.template GetUidData<vertex_shader_uid_data>();
+	if (uid_data == nullptr)
+		uid_data = &dummy_data;
 
 	out.SetBuffer(text);
 	const bool is_writing_shadercode = (out.GetBuffer() != nullptr);
-#ifndef ANDROID
-	locale_t locale;
-	locale_t old_locale;
-	if (is_writing_shadercode)
-	{
-		locale = newlocale(LC_NUMERIC_MASK, "C", nullptr); // New locale for compilation
-		old_locale = uselocale(locale); // Apply the locale for this thread
-	}
-#endif
 
 	if (is_writing_shadercode)
 		text[sizeof(text) - 1] = 0x7C;  // canary
 
 	_assert_(bpmem.genMode.numtexgens == xfmem.numTexGen.numTexGens);
 	_assert_(bpmem.genMode.numcolchans == xfmem.numChan.numColorChans);
+
+	if (DriverDetails::HasBug(DriverDetails::BUG_BROKENIVECSHIFTS))
+	{
+		// Add functions to do shifts on scalars and ivecs.
+		// This is included in the vertex shader for lighting shader generation.
+		out.Write("int ilshift(int a, int b) { return a << b; }\n"
+		          "int irshift(int a, int b) { return a >> b; }\n"
+
+		          "int2 ilshift(int2 a, int2 b) { return int2(a.x << b.x, a.y << b.y); }\n"
+		          "int2 ilshift(int2 a, int b) { return int2(a.x << b, a.y << b); }\n"
+		          "int2 irshift(int2 a, int2 b) { return int2(a.x >> b.x, a.y >> b.y); }\n"
+		          "int2 irshift(int2 a, int b) { return int2(a.x >> b, a.y >> b); }\n"
+
+		          "int3 ilshift(int3 a, int3 b) { return int3(a.x << b.x, a.y << b.y, a.z << b.z); }\n"
+		          "int3 ilshift(int3 a, int b) { return int3(a.x << b, a.y << b, a.z << b); }\n"
+		          "int3 irshift(int3 a, int3 b) { return int3(a.x >> b.x, a.y >> b.y, a.z >> b.z); }\n"
+		          "int3 irshift(int3 a, int b) { return int3(a.x >> b, a.y >> b, a.z >> b); }\n"
+
+		          "int4 ilshift(int4 a, int4 b) { return int4(a.x << b.x, a.y << b.y, a.z << b.z, a.w << b.w); }\n"
+		          "int4 ilshift(int4 a, int b) { return int4(a.x << b, a.y << b, a.z << b, a.w << b); }\n"
+		          "int4 irshift(int4 a, int4 b) { return int4(a.x >> b.x, a.y >> b.y, a.z >> b.z, a.w >> b.w); }\n"
+		          "int4 irshift(int4 a, int b) { return int4(a.x >> b, a.y >> b, a.z >> b, a.w >> b); }\n\n");
+	}
 
 	out.Write("%s", s_lighting_struct);
 
@@ -88,23 +62,16 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 		out.Write("layout(std140%s) uniform VSBlock {\n", g_ActiveConfig.backend_info.bSupportsBindingLayout ? ", binding = 2" : "");
 	else
 		out.Write("cbuffer VSBlock {\n");
-	out.Write(
-		"\tfloat4 " I_POSNORMALMATRIX"[6];\n"
-		"\tfloat4 " I_PROJECTION"[4];\n"
-		"\tint4 " I_MATERIALS"[4];\n"
-		"\tLight " I_LIGHTS"[8];\n"
-		"\tfloat4 " I_TEXMATRICES"[24];\n"
-		"\tfloat4 " I_TRANSFORMMATRICES"[64];\n"
-		"\tfloat4 " I_NORMALMATRICES"[32];\n"
-		"\tfloat4 " I_POSTTRANSFORMMATRICES"[64];\n"
-		"\tfloat4 " I_DEPTHPARAMS";\n"
-		"};\n");
+	out.Write(s_shader_uniforms);
+	out.Write("};\n");
 
-	GenerateVSOutputStruct(out, api_type);
+	out.Write("struct VS_OUTPUT {\n");
+	GenerateVSOutputMembers<T>(out, api_type);
+	out.Write("};\n");
 
-	uid_data.numTexGens = xfmem.numTexGen.numTexGens;
-	uid_data.components = components;
-	uid_data.pixel_lighting = g_ActiveConfig.bEnablePixelLighting;
+	uid_data->numTexGens = xfmem.numTexGen.numTexGens;
+	uid_data->components = components;
+	uid_data->pixel_lighting = g_ActiveConfig.bEnablePixelLighting;
 
 	if (api_type == API_OPENGL)
 	{
@@ -130,20 +97,31 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 				out.Write("in float%d tex%d; // ATTR%d,\n", hastexmtx ? 3 : 2, i, SHADER_TEXTURE0_ATTRIB + i);
 		}
 
-		// Let's set up attributes
-		for (size_t i = 0; i < 8; ++i)
+		if (g_ActiveConfig.backend_info.bSupportsGeometryShaders)
 		{
-			if (i < xfmem.numTexGen.numTexGens)
-			{
-				out.Write("centroid out  float3 uv%d;\n", i);
-			}
+			out.Write("out VertexData {\n");
+			GenerateVSOutputMembers<T>(out, api_type, g_ActiveConfig.backend_info.bSupportsBindingLayout ? "centroid" : "centroid out");
+			out.Write("} vs;\n");
 		}
-		out.Write("centroid out   float4 clipPos;\n");
-		if (g_ActiveConfig.bEnablePixelLighting)
-			out.Write("centroid out   float4 Normal;\n");
-
-		out.Write("centroid out   float4 colors_02;\n");
-		out.Write("centroid out   float4 colors_12;\n");
+		else
+		{
+			// Let's set up attributes
+			for (size_t i = 0; i < 8; ++i)
+			{
+				if (i < xfmem.numTexGen.numTexGens)
+				{
+					out.Write("centroid out float3 uv%d;\n", i);
+				}
+			}
+			out.Write("centroid out float4 clipPos;\n");
+			if (g_ActiveConfig.bEnablePixelLighting)
+			{
+				out.Write("centroid out float3 Normal;\n");
+				out.Write("centroid out float3 WorldPos;\n");
+			}
+			out.Write("centroid out float4 colors_0;\n");
+			out.Write("centroid out float4 colors_1;\n");
+		}
 
 		out.Write("void main()\n{\n");
 	}
@@ -172,12 +150,13 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 			out.Write("  int posmtx : BLENDINDICES,\n");
 		out.Write("  float4 rawpos : POSITION) {\n");
 	}
+
 	out.Write("VS_OUTPUT o;\n");
 
 	// transforms
 	if (components & VB_HAS_POSMTXIDX)
 	{
-		if (is_writing_shadercode && (DriverDetails::HasBug(DriverDetails::BUG_NODYNUBOACCESS) && !DriverDetails::HasBug(DriverDetails::BUG_ANNIHILATEDUBOS)) )
+		if (is_writing_shadercode && (DriverDetails::HasBug(DriverDetails::BUG_NODYNUBOACCESS) && !DriverDetails::HasBug(DriverDetails::BUG_ANNIHILATEDUBOS)))
 		{
 			// This'll cause issues, but  it can't be helped
 			out.Write("float4 pos = float4(dot(" I_TRANSFORMMATRICES"[0], rawpos), dot(" I_TRANSFORMMATRICES"[1], rawpos), dot(" I_TRANSFORMMATRICES"[2], rawpos), 1);\n");
@@ -188,11 +167,13 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 		{
 			out.Write("float4 pos = float4(dot(" I_TRANSFORMMATRICES"[posmtx], rawpos), dot(" I_TRANSFORMMATRICES"[posmtx+1], rawpos), dot(" I_TRANSFORMMATRICES"[posmtx+2], rawpos), 1);\n");
 
-			if (components & VB_HAS_NRMALL) {
+			if (components & VB_HAS_NRMALL)
+			{
 				out.Write("int normidx = posmtx >= 32 ? (posmtx-32) : posmtx;\n");
 				out.Write("float3 N0 = " I_NORMALMATRICES"[normidx].xyz, N1 = " I_NORMALMATRICES"[normidx+1].xyz, N2 = " I_NORMALMATRICES"[normidx+2].xyz;\n");
 			}
 		}
+
 		if (components & VB_HAS_NRM0)
 			out.Write("float3 _norm0 = normalize(float3(dot(N0, rawnorm0), dot(N1, rawnorm0), dot(N2, rawnorm0)));\n");
 		if (components & VB_HAS_NRM1)
@@ -218,10 +199,10 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 	out.Write("o.pos = float4(dot(" I_PROJECTION"[0], pos), dot(" I_PROJECTION"[1], pos), dot(" I_PROJECTION"[2], pos), dot(" I_PROJECTION"[3], pos));\n");
 
 	out.Write("int4 lacc;\n"
-			"float3 ldir, h;\n"
+			"float3 ldir, h, cosAttn, distAttn;\n"
 			"float dist, dist2, attn;\n");
 
-	uid_data.numColorChans = xfmem.numChan.numColorChans;
+	uid_data->numColorChans = xfmem.numChan.numColorChans;
 	if (xfmem.numChan.numColorChans == 0)
 	{
 		if (components & VB_HAS_COL0)
@@ -230,7 +211,7 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 			out.Write("o.colors_0 = float4(1.0, 1.0, 1.0, 1.0);\n");
 	}
 
-	GenerateLightingShader<T>(out, uid_data.lighting, components, "color", "o.colors_");
+	GenerateLightingShader<T>(out, uid_data->lighting, components, "color", "o.colors_");
 
 	if (xfmem.numChan.numColorChans < 2)
 	{
@@ -243,8 +224,8 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 	// donko - this has caused problems in some games. removed for now.
 	bool texGenSpecialCase = false;
 	/*bool texGenSpecialCase =
-		((g_VtxDesc.Hex & 0x60600L) == g_VtxDesc.Hex) && // only pos and tex coord 0
-		(g_VtxDesc.Tex0Coord != NOT_PRESENT) &&
+		((g_main_cp_state.vtx_desc.Hex & 0x60600L) == g_main_cp_state.vtx_desc.Hex) && // only pos and tex coord 0
+		(g_main_cp_state.vtx_desc.Tex0Coord != NOT_PRESENT) &&
 		(xfmem.texcoords[0].texmtxinfo.inputform == XF_TEXINPUT_AB11);
 		*/
 
@@ -256,46 +237,46 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 
 		out.Write("{\n");
 		out.Write("coord = float4(0.0, 0.0, 1.0, 1.0);\n");
-		uid_data.texMtxInfo[i].sourcerow = xfmem.texMtxInfo[i].sourcerow;
+		uid_data->texMtxInfo[i].sourcerow = xfmem.texMtxInfo[i].sourcerow;
 		switch (texinfo.sourcerow)
 		{
 		case XF_SRCGEOM_INROW:
-			_assert_( texinfo.inputform == XF_TEXINPUT_ABC1 );
+			_assert_(texinfo.inputform == XF_TEXINPUT_ABC1);
 			out.Write("coord = rawpos;\n"); // pos.w is 1
 			break;
 		case XF_SRCNORMAL_INROW:
 			if (components & VB_HAS_NRM0)
 			{
-				_assert_( texinfo.inputform == XF_TEXINPUT_ABC1 );
+				_assert_(texinfo.inputform == XF_TEXINPUT_ABC1);
 				out.Write("coord = float4(rawnorm0.xyz, 1.0);\n");
 			}
 			break;
 		case XF_SRCCOLORS_INROW:
-			_assert_( texinfo.texgentype == XF_TEXGEN_COLOR_STRGBC0 || texinfo.texgentype == XF_TEXGEN_COLOR_STRGBC1 );
+			_assert_(texinfo.texgentype == XF_TEXGEN_COLOR_STRGBC0 || texinfo.texgentype == XF_TEXGEN_COLOR_STRGBC1);
 			break;
 		case XF_SRCBINORMAL_T_INROW:
 			if (components & VB_HAS_NRM1)
 			{
-				_assert_( texinfo.inputform == XF_TEXINPUT_ABC1 );
+				_assert_(texinfo.inputform == XF_TEXINPUT_ABC1);
 				out.Write("coord = float4(rawnorm1.xyz, 1.0);\n");
 			}
 			break;
 		case XF_SRCBINORMAL_B_INROW:
 			if (components & VB_HAS_NRM2)
 			{
-				_assert_( texinfo.inputform == XF_TEXINPUT_ABC1 );
+				_assert_(texinfo.inputform == XF_TEXINPUT_ABC1);
 				out.Write("coord = float4(rawnorm2.xyz, 1.0);\n");
 			}
 			break;
 		default:
 			_assert_(texinfo.sourcerow <= XF_SRCTEX7_INROW);
-			if (components & (VB_HAS_UV0<<(texinfo.sourcerow - XF_SRCTEX0_INROW)) )
+			if (components & (VB_HAS_UV0 << (texinfo.sourcerow - XF_SRCTEX0_INROW)))
 				out.Write("coord = float4(tex%d.x, tex%d.y, 1.0, 1.0);\n", texinfo.sourcerow - XF_SRCTEX0_INROW, texinfo.sourcerow - XF_SRCTEX0_INROW);
 			break;
 		}
 
 		// first transformation
-		uid_data.texMtxInfo[i].texgentype = xfmem.texMtxInfo[i].texgentype;
+		uid_data->texMtxInfo[i].texgentype = xfmem.texMtxInfo[i].texgentype;
 		switch (texinfo.texgentype)
 		{
 			case XF_TEXGEN_EMBOSS_MAP: // calculate tex coords into bump map
@@ -303,15 +284,15 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 				if (components & (VB_HAS_NRM1|VB_HAS_NRM2))
 				{
 					// transform the light dir into tangent space
-					uid_data.texMtxInfo[i].embosslightshift = xfmem.texMtxInfo[i].embosslightshift;
-					uid_data.texMtxInfo[i].embosssourceshift = xfmem.texMtxInfo[i].embosssourceshift;
+					uid_data->texMtxInfo[i].embosslightshift = xfmem.texMtxInfo[i].embosslightshift;
+					uid_data->texMtxInfo[i].embosssourceshift = xfmem.texMtxInfo[i].embosssourceshift;
 					out.Write("ldir = normalize(" LIGHT_POS".xyz - pos.xyz);\n", LIGHT_POS_PARAMS(texinfo.embosslightshift));
 					out.Write("o.tex%d.xyz = o.tex%d.xyz + float3(dot(ldir, _norm1), dot(ldir, _norm2), 0.0);\n", i, texinfo.embosssourceshift);
 				}
 				else
 				{
 					_assert_(0); // should have normals
-					uid_data.texMtxInfo[i].embosssourceshift = xfmem.texMtxInfo[i].embosssourceshift;
+					uid_data->texMtxInfo[i].embosssourceshift = xfmem.texMtxInfo[i].embosssourceshift;
 					out.Write("o.tex%d.xyz = o.tex%d.xyz;\n", i, texinfo.embosssourceshift);
 				}
 
@@ -326,7 +307,7 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 				break;
 			case XF_TEXGEN_REGULAR:
 			default:
-				uid_data.texMtxInfo_n_projection |= xfmem.texMtxInfo[i].projection << i;
+				uid_data->texMtxInfo_n_projection |= xfmem.texMtxInfo[i].projection << i;
 				if (components & (VB_HAS_TEXMTXIDX0<<i))
 				{
 					out.Write("int tmp = int(tex%d.z);\n", i);
@@ -345,18 +326,18 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 				break;
 		}
 
-		uid_data.dualTexTrans_enabled = xfmem.dualTexTrans.enabled;
+		uid_data->dualTexTrans_enabled = xfmem.dualTexTrans.enabled;
 		// CHECKME: does this only work for regular tex gen types?
 		if (xfmem.dualTexTrans.enabled && texinfo.texgentype == XF_TEXGEN_REGULAR)
 		{
 			const PostMtxInfo& postInfo = xfmem.postMtxInfo[i];
 
-			uid_data.postMtxInfo[i].index = xfmem.postMtxInfo[i].index;
+			uid_data->postMtxInfo[i].index = xfmem.postMtxInfo[i].index;
 			int postidx = postInfo.index;
 			out.Write("float4 P0 = " I_POSTTRANSFORMMATRICES"[%d];\n"
 				"float4 P1 = " I_POSTTRANSFORMMATRICES"[%d];\n"
 				"float4 P2 = " I_POSTTRANSFORMMATRICES"[%d];\n",
-				postidx&0x3f, (postidx+1)&0x3f, (postidx+2)&0x3f);
+				postidx & 0x3f, (postidx + 1) & 0x3f, (postidx + 2) & 0x3f);
 
 			if (texGenSpecialCase)
 			{
@@ -369,7 +350,7 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 			}
 			else
 			{
-				uid_data.postMtxInfo[i].normalize = xfmem.postMtxInfo[i].normalize;
+				uid_data->postMtxInfo[i].normalize = xfmem.postMtxInfo[i].normalize;
 				if (postInfo.normalize)
 					out.Write("o.tex%d.xyz = normalize(o.tex%d.xyz);\n", i, i);
 
@@ -382,11 +363,12 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 	}
 
 	// clipPos/w needs to be done in pixel shader, not here
-	out.Write("o.clipPos = float4(pos.x,pos.y,o.pos.z,o.pos.w);\n");
+	out.Write("o.clipPos = o.pos;\n");
 
 	if (g_ActiveConfig.bEnablePixelLighting)
 	{
-		out.Write("o.Normal = float4(_norm0.x,_norm0.y,_norm0.z,pos.z);\n");
+		out.Write("o.Normal = _norm0;\n");
+		out.Write("o.WorldPos = pos.xyz;\n");
 
 		if (components & VB_HAS_COL0)
 			out.Write("o.colors_0 = color0;\n");
@@ -399,7 +381,7 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 	//if not early z culling will improve speed
 	if (api_type == API_D3D)
 	{
-		out.Write("o.pos.z = " I_DEPTHPARAMS".x * o.pos.w + o.pos.z * " I_DEPTHPARAMS".y;\n");
+		out.Write("o.pos.z = o.pos.w + o.pos.z;\n");
 	}
 	else // OGL
 	{
@@ -424,41 +406,42 @@ static inline void GenerateVertexShader(T& out, u32 components, API_TYPE api_typ
 	// which in turn can be critical if it happens for clear quads.
 	// Hence, we compensate for this pixel center difference so that primitives
 	// get rasterized correctly.
-	out.Write("o.pos.xy = o.pos.xy - " I_DEPTHPARAMS".zw;\n");
+	out.Write("o.pos.xy = o.pos.xy - o.pos.w * " I_PIXELCENTERCORRECTION".xy;\n");
 
 	if (api_type == API_OPENGL)
 	{
-		// Bit ugly here
-		// TODO: Make pretty
-		// Will look better when we bind uniforms in GLSL 1.3
-		// clipPos/w needs to be done in pixel shader, not here
+		if (g_ActiveConfig.backend_info.bSupportsGeometryShaders)
+		{
+			AssignVSOutputMembers(out, "vs", "o");
+		}
+		else
+		{
+			// TODO: Pass interface blocks between shader stages even if geometry shaders
+			// are not supported, however that will require at least OpenGL 3.2 support.
+			for (unsigned int i = 0; i < xfmem.numTexGen.numTexGens; ++i)
+				out.Write("uv%d.xyz = o.tex%d;\n", i, i);
+			out.Write("clipPos = o.clipPos;\n");
+			if (g_ActiveConfig.bEnablePixelLighting)
+			{
+				out.Write("Normal = o.Normal;\n");
+				out.Write("WorldPos = o.WorldPos;\n");
+			}
+			out.Write("colors_0 = o.colors_0;\n");
+			out.Write("colors_1 = o.colors_1;\n");
+		}
 
-		for (unsigned int i = 0; i < xfmem.numTexGen.numTexGens; ++i)
-			out.Write(" uv%d.xyz =  o.tex%d;\n", i, i);
-		out.Write("  clipPos = o.clipPos;\n");
-
-		if (g_ActiveConfig.bEnablePixelLighting)
-			out.Write("  Normal = o.Normal;\n");
-
-		out.Write("colors_02 = o.colors_0;\n");
-		out.Write("colors_12 = o.colors_1;\n");
 		out.Write("gl_Position = o.pos;\n");
-		out.Write("}\n");
 	}
 	else // D3D
 	{
-		out.Write("return o;\n}\n");
+		out.Write("return o;\n");
 	}
+	out.Write("}\n");
 
 	if (is_writing_shadercode)
 	{
 		if (text[sizeof(text) - 1] != 0x7C)
 			PanicAlert("VertexShader generator - buffer too small, canary has been eaten!");
-
-#ifndef ANDROID
-		uselocale(old_locale); // restore locale
-		freelocale(locale);
-#endif
 	}
 }
 
@@ -470,9 +453,4 @@ void GetVertexShaderUid(VertexShaderUid& object, u32 components, API_TYPE api_ty
 void GenerateVertexShaderCode(VertexShaderCode& object, u32 components, API_TYPE api_type)
 {
 	GenerateVertexShader<VertexShaderCode>(object, components, api_type);
-}
-
-void GenerateVSOutputStructForGS(ShaderCode& object, API_TYPE api_type)
-{
-	GenerateVSOutputStruct<ShaderCode>(object, api_type);
 }

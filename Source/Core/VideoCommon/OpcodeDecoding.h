@@ -4,7 +4,11 @@
 
 #pragma once
 
+#include "Common/CommonTypes.h"
+#include "VideoCommon/DataReader.h"
+
 #define GX_NOP                      0x00
+#define GX_UNKNOWN_RESET            0x01
 
 #define GX_LOAD_BP_REG              0x61
 #define GX_LOAD_CP_REG              0x08
@@ -38,5 +42,6 @@ extern bool g_bRecordFifoData;
 
 void OpcodeDecoder_Init();
 void OpcodeDecoder_Shutdown();
-u32 OpcodeDecoder_Run(bool skipped_frame);
-void InterpretDisplayList(u32 address, u32 size);
+
+template <bool is_preprocess = false>
+u8* OpcodeDecoder_Run(DataReader src, u32* cycles, bool in_display_list);

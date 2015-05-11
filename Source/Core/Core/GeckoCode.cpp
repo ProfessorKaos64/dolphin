@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Common/CommonPaths.h"
+#include "Common/FileUtil.h"
 #include "Common/Thread.h"
 
 #include "Core/ConfigManager.h"
@@ -14,8 +15,12 @@
 
 namespace Gecko
 {
+
+static const u32 INSTALLER_BASE_ADDRESS = 0x80001800;
+static const u32 INSTALLER_END_ADDRESS = 0x80003000;
+
 // return true if a code exists
-bool GeckoCode::Exist(u32 address, u32 data)
+bool GeckoCode::Exist(u32 address, u32 data) const
 {
 	for (const GeckoCode::Code& code : codes)
 	{
@@ -70,7 +75,6 @@ void SetActiveCodes(const std::vector<GeckoCode>& gcodes)
 
 static bool InstallCodeHandler()
 {
-	u32 codelist_location = 0x800028B8; // Debugger on location (0x800022A8 = Debugger off, using codehandleronly.bin)
 	std::string data;
 	std::string _rCodeHandlerFilename = File::GetSysDirectory() + GECKO_CODE_HANDLER;
 	if (!File::ReadFileToString(_rCodeHandlerFilename, data))
@@ -79,19 +83,37 @@ static bool InstallCodeHandler()
 		return false;
 	}
 
-	// Install code handler
-	Memory::WriteBigEData((const u8*)data.data(), 0x80001800, data.length());
+	u8 mmioAddr = 0xCC;
 
-	// Turn off Pause on start
-	Memory::Write_U32(0, 0x80002774);
+	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bWii)
+	{
+		mmioAddr = 0xCD;
+	}
+
+	// Install code handler
+	for (size_t i = 0, e = data.length(); i < e; ++i)
+		PowerPC::HostWrite_U8(data[i], (u32)(INSTALLER_BASE_ADDRESS + i));
+
+	// Patch the code handler to the system starting up
+	for (unsigned int h = 0; h < data.length(); h += 4)
+	{
+		// Patch MMIO address
+		if (PowerPC::HostRead_U32(INSTALLER_BASE_ADDRESS + h) == (0x3f000000u | ((mmioAddr ^ 1) << 8)))
+		{
+			NOTICE_LOG(ACTIONREPLAY, "Patching MMIO access at %08x", INSTALLER_BASE_ADDRESS + h);
+			PowerPC::HostWrite_U32(0x3f000000u | mmioAddr << 8, INSTALLER_BASE_ADDRESS + h);
+		}
+	}
+
+	u32 codelist_base_address = INSTALLER_BASE_ADDRESS + (u32)data.length() - 8;
+	u32 codelist_end_address = INSTALLER_END_ADDRESS;
 
 	// Write a magic value to 'gameid' (codehandleronly does not actually read this).
-	// For the purpose of this, see HLEGeckoCodehandler.
-	Memory::Write_U32(0xd01f1bad, 0x80001800);
+	PowerPC::HostWrite_U32(0xd01f1bad, INSTALLER_BASE_ADDRESS);
 
 	// Create GCT in memory
-	Memory::Write_U32(0x00d0c0de, codelist_location);
-	Memory::Write_U32(0x00d0c0de, codelist_location + 4);
+	PowerPC::HostWrite_U32(0x00d0c0de, codelist_base_address);
+	PowerPC::HostWrite_U32(0x00d0c0de, codelist_base_address + 4);
 
 	std::lock_guard<std::mutex> lk(active_codes_lock);
 
@@ -104,26 +126,30 @@ static bool InstallCodeHandler()
 			for (const GeckoCode::Code& code : active_code.codes)
 			{
 				// Make sure we have enough memory to hold the code list
-				if ((codelist_location + 24 + i) < 0x80003000)
+				if ((codelist_base_address + 24 + i) < codelist_end_address)
 				{
-					Memory::Write_U32(code.address, codelist_location + 8 + i);
-					Memory::Write_U32(code.data, codelist_location + 12 + i);
+					PowerPC::HostWrite_U32(code.address, codelist_base_address + 8 + i);
+					PowerPC::HostWrite_U32(code.data, codelist_base_address + 12 + i);
 					i += 8;
 				}
 			}
 		}
 	}
 
-	Memory::Write_U32(0xff000000, codelist_location + 8 + i);
-	Memory::Write_U32(0x00000000, codelist_location + 12 + i);
+	PowerPC::HostWrite_U32(0xff000000, codelist_base_address + 8 + i);
+	PowerPC::HostWrite_U32(0x00000000, codelist_base_address + 12 + i);
 
 	// Turn on codes
-	Memory::Write_U8(1, 0x80001807);
+	PowerPC::HostWrite_U8(1, INSTALLER_BASE_ADDRESS + 7);
 
-	// Invalidate the icache
-	for (unsigned int j = 0; j < data.length(); j += 32)
+	// Invalidate the icache and any asm codes
+	for (unsigned int j = 0; j < (INSTALLER_END_ADDRESS - INSTALLER_BASE_ADDRESS); j += 32)
 	{
-		PowerPC::ppcState.iCache.Invalidate(0x80001800 + j);
+		PowerPC::ppcState.iCache.Invalidate(INSTALLER_BASE_ADDRESS + j);
+	}
+	for (unsigned int k = codelist_base_address; k < codelist_end_address; k += 32)
+	{
+		PowerPC::ppcState.iCache.Invalidate(k);
 	}
 	return true;
 }
@@ -132,7 +158,7 @@ void RunCodeHandler()
 {
 	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bEnableCheats && active_codes.size() > 0)
 	{
-		if (!code_handler_installed || Memory::Read_U32(0x80001800) - 0xd01f1bad > 5)
+		if (!code_handler_installed || PowerPC::HostRead_U32(INSTALLER_BASE_ADDRESS) - 0xd01f1bad > 5)
 			code_handler_installed = InstallCodeHandler();
 
 		if (!code_handler_installed)
@@ -146,7 +172,7 @@ void RunCodeHandler()
 			u32 oldLR = LR;
 			PowerPC::CoreMode oldMode = PowerPC::GetMode();
 
-			PC = 0x800018A8;
+			PC = INSTALLER_BASE_ADDRESS + 0xA8;
 			LR = 0;
 
 			// Execute the code handler in interpreter mode to track when it exits

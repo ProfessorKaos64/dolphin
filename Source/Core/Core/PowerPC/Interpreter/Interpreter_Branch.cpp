@@ -92,11 +92,6 @@ void Interpreter::HLEFunction(UGeckoInstruction _inst)
 	HLE::Execute(PC, _inst.hex);
 }
 
-void Interpreter::CompiledBlock(UGeckoInstruction _inst)
-{
-	_assert_msg_(POWERPC, 0, "CompiledBlock - shouldn't be here!");
-}
-
 void Interpreter::rfi(UGeckoInstruction _inst)
 {
 	// Restore saved bits from SRR1 to MSR.
@@ -120,11 +115,11 @@ void Interpreter::rfid(UGeckoInstruction _inst)
 	m_EndBlock = true;
 }
 
-// sc isn't really used for anything important in gc games (just for a write barrier) so we really don't have to emulate it.
+// sc isn't really used for anything important in GameCube games (just for a write barrier) so we really don't have to emulate it.
 // We do it anyway, though :P
 void Interpreter::sc(UGeckoInstruction _inst)
 {
-	Common::AtomicOr(PowerPC::ppcState.Exceptions, EXCEPTION_SYSCALL);
+	PowerPC::ppcState.Exceptions |= EXCEPTION_SYSCALL;
 	PowerPC::CheckExceptions();
 	m_EndBlock = true;
 }

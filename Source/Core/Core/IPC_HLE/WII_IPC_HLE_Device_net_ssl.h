@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <string>
 #include <polarssl/ctr_drbg.h>
 #include <polarssl/entropy.h>
 #include <polarssl/net.h>
@@ -11,7 +12,6 @@
 
 #include "Core/IPC_HLE/WII_IPC_HLE_Device.h"
 
-#define NET_SSL_MAX_HOSTNAME_LEN 256
 #define NET_SSL_MAXINSTANCES 4
 
 #define SSLID_VALID(x) (x >= 0 && x < NET_SSL_MAXINSTANCES && CWII_IPC_HLE_Device_net_ssl::_SSL[x].active)
@@ -64,7 +64,7 @@ struct WII_SSL
 	x509_crt clicert;
 	pk_context pk;
 	int sockfd;
-	char hostname[NET_SSL_MAX_HOSTNAME_LEN];
+	std::string hostname;
 	bool active;
 };
 
@@ -76,13 +76,13 @@ public:
 
 	virtual ~CWII_IPC_HLE_Device_net_ssl();
 
-	virtual bool Open(u32 _CommandAddress, u32 _Mode) override;
+	virtual IPCCommandResult Open(u32 _CommandAddress, u32 _Mode) override;
+	virtual IPCCommandResult Close(u32 _CommandAddress, bool _bForce) override;
 
-	virtual bool Close(u32 _CommandAddress, bool _bForce) override;
+	virtual IPCCommandResult IOCtl(u32 _CommandAddress) override;
+	virtual IPCCommandResult IOCtlV(u32 _CommandAddress) override;
 
-	virtual bool IOCtl(u32 _CommandAddress) override;
-	virtual bool IOCtlV(u32 _CommandAddress) override;
-	int getSSLFreeID();
+	int GetSSLFreeID() const;
 
 	static WII_SSL _SSL[NET_SSL_MAXINSTANCES];
 };

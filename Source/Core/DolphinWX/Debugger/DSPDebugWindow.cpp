@@ -4,23 +4,16 @@
 
 #include <cstdio>
 #include <wx/artprov.h>
-#include <wx/chartype.h>
-#include <wx/defs.h>
-#include <wx/event.h>
-#include <wx/gdicmn.h>
 #include <wx/listbox.h>
 #include <wx/panel.h>
 #include <wx/sizer.h>
-#include <wx/string.h>
 #include <wx/textctrl.h>
 #include <wx/thread.h>
-#include <wx/translation.h>
-#include <wx/windowid.h>
 #include <wx/aui/auibar.h>
 #include <wx/aui/auibook.h>
 #include <wx/aui/framemanager.h>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 #include "Common/SymbolDB.h"
 #include "Core/Host.h"
@@ -33,23 +26,16 @@
 #include "DolphinWX/Debugger/DSPRegisterView.h"
 #include "DolphinWX/Debugger/MemoryView.h"
 
-class wxWindow;
-
 static DSPDebuggerLLE* m_DebuggerFrame = nullptr;
-
-BEGIN_EVENT_TABLE(DSPDebuggerLLE, wxPanel)
-	EVT_CLOSE(DSPDebuggerLLE::OnClose)
-	EVT_MENU_RANGE(ID_RUNTOOL, ID_SHOWPCTOOL, DSPDebuggerLLE::OnChangeState)
-	EVT_TEXT_ENTER(ID_ADDRBOX, DSPDebuggerLLE::OnAddrBoxChange)
-	EVT_LISTBOX(ID_SYMBOLLIST, DSPDebuggerLLE::OnSymbolListChange)
-END_EVENT_TABLE()
-
 
 DSPDebuggerLLE::DSPDebuggerLLE(wxWindow* parent, wxWindowID id)
 	: wxPanel(parent, id, wxDefaultPosition, wxDefaultSize,
 			wxTAB_TRAVERSAL, _("DSP LLE Debugger"))
 	, m_CachedStepCounter(-1)
 {
+	Bind(wxEVT_CLOSE_WINDOW, &DSPDebuggerLLE::OnClose, this);
+	Bind(wxEVT_MENU, &DSPDebuggerLLE::OnChangeState, this, ID_RUNTOOL, ID_SHOWPCTOOL);
+
 	m_DebuggerFrame = this;
 
 	// notify wxAUI which frame to use
@@ -65,12 +51,16 @@ DSPDebuggerLLE::DSPDebuggerLLE(wxWindow* parent, wxWindowID id)
 	m_Toolbar->AddTool(ID_SHOWPCTOOL, _("Show PC"),
 		wxArtProvider::GetBitmap(wxART_GO_TO_PARENT, wxART_OTHER, wxSize(10,10)));
 	m_Toolbar->AddSeparator();
-	m_Toolbar->AddControl(new wxTextCtrl(m_Toolbar, ID_ADDRBOX, wxEmptyString,
-		wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER));
+
+	m_addr_txtctrl = new wxTextCtrl(m_Toolbar, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER);
+	m_addr_txtctrl->Bind(wxEVT_TEXT_ENTER, &DSPDebuggerLLE::OnAddrBoxChange, this);
+
+	m_Toolbar->AddControl(m_addr_txtctrl);
 	m_Toolbar->Realize();
 
-	m_SymbolList = new wxListBox(this, ID_SYMBOLLIST, wxDefaultPosition,
+	m_SymbolList = new wxListBox(this, wxID_ANY, wxDefaultPosition,
 		wxSize(140, 100), 0, nullptr, wxLB_SORT);
+	m_SymbolList->Bind(wxEVT_LISTBOX, &DSPDebuggerLLE::OnSymbolListChange, this);
 
 	m_MainNotebook = new wxAuiNotebook(this, wxID_ANY,
 		wxDefaultPosition, wxDefaultSize,
@@ -92,7 +82,7 @@ DSPDebuggerLLE::DSPDebuggerLLE(wxWindow* parent, wxWindowID id)
 	mem_panel->SetSizer(mem_sizer);
 	m_MainNotebook->AddPage(mem_panel, _("Memory"));
 
-	m_Regs = new DSPRegisterView(this, ID_DSP_REGS);
+	m_Regs = new DSPRegisterView(this);
 
 	// add the panes to the manager
 	m_mgr.AddPane(m_Toolbar, wxAuiPaneInfo().
@@ -174,7 +164,6 @@ void DSPDebuggerLLE::Update()
 	UpdateDisAsmListView();
 	UpdateRegisterFlags();
 	UpdateState();
-	m_mgr.Update();
 #if defined __WXGTK__
 	if (!wxIsMainThread())
 		wxMutexGuiLeave();
@@ -234,7 +223,8 @@ void DSPDebuggerLLE::UpdateSymbolMap()
 void DSPDebuggerLLE::OnSymbolListChange(wxCommandEvent& event)
 {
 	int index = m_SymbolList->GetSelection();
-	if (index >= 0) {
+	if (index >= 0)
+	{
 		Symbol* pSymbol = static_cast<Symbol *>(m_SymbolList->GetClientData(index));
 		if (pSymbol != nullptr)
 		{
@@ -252,8 +242,7 @@ void DSPDebuggerLLE::UpdateRegisterFlags()
 
 void DSPDebuggerLLE::OnAddrBoxChange(wxCommandEvent& event)
 {
-	wxTextCtrl* pAddrCtrl = (wxTextCtrl*)m_Toolbar->FindControl(ID_ADDRBOX);
-	wxString txt = pAddrCtrl->GetValue();
+	wxString txt = m_addr_txtctrl->GetValue();
 
 	auto text = StripSpaces(WxStrToStr(txt));
 	if (text.size())
@@ -261,9 +250,9 @@ void DSPDebuggerLLE::OnAddrBoxChange(wxCommandEvent& event)
 		u32 addr;
 		sscanf(text.c_str(), "%04x", &addr);
 		if (JumpToAddress(addr))
-			pAddrCtrl->SetBackgroundColour(*wxWHITE);
+			m_addr_txtctrl->SetBackgroundColour(*wxWHITE);
 		else
-			pAddrCtrl->SetBackgroundColour(*wxRED);
+			m_addr_txtctrl->SetBackgroundColour(*wxRED);
 	}
 	event.Skip();
 }
@@ -275,7 +264,8 @@ bool DSPDebuggerLLE::JumpToAddress(u16 addr)
 	{
 		// Center on valid instruction in IRAM/IROM
 		int new_line = DSPSymbols::Addr2Line(addr);
-		if (new_line >= 0) {
+		if (new_line >= 0)
+		{
 			m_CodeView->Center(new_line);
 			return true;
 		}

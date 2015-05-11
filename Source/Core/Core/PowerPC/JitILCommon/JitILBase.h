@@ -15,7 +15,7 @@
 #include "Core/PowerPC/JitCommon/JitBase.h"
 #include "Core/PowerPC/JitILCommon/IR.h"
 
-class JitILBase : public JitBase
+class JitILBase : public Jitx86Base
 {
 protected:
 	// The default code buffer. We keep it around to not have to alloc/dealloc a
@@ -27,18 +27,11 @@ public:
 
 	IREmitter::IRBuilder ibuild;
 
-	virtual JitBaseBlockCache *GetBlockCache() = 0;
-
 	virtual void Jit(u32 em_address) = 0;
-
-	virtual const u8 *BackPatch(u8 *codePtr, u32 em_address, void *ctx) = 0;
 
 	virtual const CommonAsmRoutinesBase *GetAsmRoutines() = 0;
 
-	virtual bool IsInCodeSpace(u8 *ptr) = 0;
-
 	// OPCODES
-	virtual void unknown_instruction(UGeckoInstruction inst) = 0;
 	virtual void FallBackToInterpreter(UGeckoInstruction inst) = 0;
 	virtual void DoNothing(UGeckoInstruction inst) = 0;
 	virtual void HLEFunction(UGeckoInstruction inst) = 0;
@@ -60,6 +53,7 @@ public:
 	// LoadStore
 	void lXzx(UGeckoInstruction inst);
 	void lhax(UGeckoInstruction inst);
+	void lhaux(UGeckoInstruction inst);
 	void stXx(UGeckoInstruction inst);
 	void lmw(UGeckoInstruction inst);
 	void stmw(UGeckoInstruction inst);
@@ -67,6 +61,7 @@ public:
 	void lXz(UGeckoInstruction inst);
 	void lbzu(UGeckoInstruction inst);
 	void lha(UGeckoInstruction inst);
+	void lhau(UGeckoInstruction inst);
 
 	// System Registers
 	void mtspr(UGeckoInstruction inst);
@@ -119,7 +114,9 @@ public:
 	void cntlzwx(UGeckoInstruction inst);
 
 	void lfs(UGeckoInstruction inst);
+	void lfsu(UGeckoInstruction inst);
 	void lfd(UGeckoInstruction inst);
+	void lfdu(UGeckoInstruction inst);
 	void stfd(UGeckoInstruction inst);
 	void stfs(UGeckoInstruction inst);
 	void stfsx(UGeckoInstruction inst);

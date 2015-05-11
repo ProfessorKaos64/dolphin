@@ -26,12 +26,12 @@
 #include "Core/DSP/DSPAnalyzer.h"
 #include "Core/DSP/DSPCore.h"
 #include "Core/DSP/DSPHWInterface.h"
+#include "Core/DSP/DSPInterpreter.h"
 #include "Core/DSP/DSPIntUtil.h"
+#include "Core/DSP/DSPMemoryMap.h"
 #include "Core/DSP/DSPTables.h"
 
 namespace DSPInterpreter {
-
-static volatile u32 gdsp_running;
 
 // NOTE: These have nothing to do with g_dsp.r.cr !
 
@@ -48,7 +48,7 @@ void WriteCR(u16 val)
 	else if (val == 4)
 	{
 		// HAX!
-		// OSInitAudioSystem ucode should send this mail - not dsp core itself
+		// OSInitAudioSystem ucode should send this mail - not DSP core itself
 		INFO_LOG(DSPLLE,"DSP_CONTROL INIT");
 		init_hax = true;
 		val |= 0x800;
@@ -223,11 +223,6 @@ int RunCycles(int cycles)
 			// it just won't call this function anymore.
 		}
 	}
-}
-
-void Stop()
-{
-	gdsp_running = false;
 }
 
 }  // namespace

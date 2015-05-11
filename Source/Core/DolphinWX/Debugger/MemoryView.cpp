@@ -3,32 +3,28 @@
 // Refer to the license.txt file included.
 
 #include <cmath>
-#include <cstdio>
-#include <cstring>
 #include <string>
 #include <wx/brush.h>
-#include <wx/chartype.h>
 #include <wx/clipbrd.h>
 #include <wx/colour.h>
 #include <wx/control.h>
 #include <wx/dataobj.h>
 #include <wx/dcclient.h>
-#include <wx/defs.h>
-#include <wx/event.h>
 #include <wx/font.h>
-#include <wx/gdicmn.h>
 #include <wx/menu.h>
 #include <wx/pen.h>
-#include <wx/setup.h>
-#include <wx/string.h>
-#include <wx/window.h>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/DebugInterface.h"
-#include "Core/Host.h"
+#include "Common/StringUtil.h"
+#include "Core/PowerPC/PowerPC.h"
+#include "DolphinWX/Frame.h"
+#include "DolphinWX/Globals.h"
 #include "DolphinWX/WxUtils.h"
+#include "DolphinWX/Debugger/CodeWindow.h"
 #include "DolphinWX/Debugger/DebuggerUIUtil.h"
 #include "DolphinWX/Debugger/MemoryView.h"
+#include "DolphinWX/Debugger/WatchWindow.h"
 
 enum
 {
@@ -38,22 +34,12 @@ enum
 	IDM_COPYCODE,
 	IDM_RUNTOHERE,
 	IDM_DYNARECRESULTS,
+	IDM_WATCHADDRESS,
 	IDM_TOGGLEMEMORY,
 	IDM_VIEWASFP,
 	IDM_VIEWASASCII,
 	IDM_VIEWASHEX,
 };
-
-BEGIN_EVENT_TABLE(CMemoryView, wxControl)
-	EVT_PAINT(CMemoryView::OnPaint)
-	EVT_LEFT_DOWN(CMemoryView::OnMouseDownL)
-	EVT_LEFT_UP(CMemoryView::OnMouseUpL)
-	EVT_MOTION(CMemoryView::OnMouseMove)
-	EVT_RIGHT_DOWN(CMemoryView::OnMouseDownR)
-	EVT_MOUSEWHEEL(CMemoryView::OnScrollWheel)
-	EVT_MENU(-1, CMemoryView::OnPopupMenu)
-	EVT_SIZE(CMemoryView::OnResize)
-END_EVENT_TABLE()
 
 CMemoryView::CMemoryView(DebugInterface* debuginterface, wxWindow* parent)
 	: wxControl(parent, wxID_ANY)
@@ -67,6 +53,14 @@ CMemoryView::CMemoryView(DebugInterface* debuginterface, wxWindow* parent)
 	, memory(0)
 	, viewAsType(VIEWAS_FP)
 {
+	Bind(wxEVT_PAINT, &CMemoryView::OnPaint, this);
+	Bind(wxEVT_LEFT_DOWN, &CMemoryView::OnMouseDownL, this);
+	Bind(wxEVT_LEFT_UP, &CMemoryView::OnMouseUpL, this);
+	Bind(wxEVT_MOTION, &CMemoryView::OnMouseMove, this);
+	Bind(wxEVT_RIGHT_DOWN, &CMemoryView::OnMouseDownR, this);
+	Bind(wxEVT_MOUSEWHEEL, &CMemoryView::OnScrollWheel, this);
+	Bind(wxEVT_MENU, &CMemoryView::OnPopupMenu, this);
+	Bind(wxEVT_SIZE, &CMemoryView::OnResize, this);
 }
 
 int CMemoryView::YToAddress(int y)
@@ -97,7 +91,10 @@ void CMemoryView::OnMouseDownL(wxMouseEvent& event)
 		debugger->ToggleMemCheck(YToAddress(y));
 
 		Refresh();
-		Host_UpdateBreakPointView();
+
+		// Propagate back to the parent window to update the breakpoint list.
+		wxCommandEvent evt(wxEVT_HOST_COMMAND, IDM_UPDATE_BREAKPOINTS);
+		GetEventHandler()->AddPendingEvent(evt);
 	}
 
 	event.Skip();
@@ -145,11 +142,11 @@ void CMemoryView::OnScrollWheel(wxMouseEvent& event)
 
 	if (scroll_down)
 	{
-		curAddress += num_lines;
+		curAddress += num_lines * 4;
 	}
 	else
 	{
-		curAddress -= num_lines;
+		curAddress -= num_lines * 4;
 	}
 
 	Refresh();
@@ -158,6 +155,10 @@ void CMemoryView::OnScrollWheel(wxMouseEvent& event)
 
 void CMemoryView::OnPopupMenu(wxCommandEvent& event)
 {
+	CFrame* main_frame = (CFrame*)(GetParent()->GetParent()->GetParent());
+	CCodeWindow* code_window = main_frame->g_pCodeWindow;
+	CWatchWindow* watch_window = code_window->m_WatchWindow;
+
 #if wxUSE_CLIPBOARD
 	wxTheClipboard->Open();
 #endif
@@ -171,12 +172,18 @@ void CMemoryView::OnPopupMenu(wxCommandEvent& event)
 
 		case IDM_COPYHEX:
 			{
-			char temp[24];
-			sprintf(temp, "%08x", debugger->ReadExtraMemory(memory, selection));
+			std::string temp = StringFromFormat("%08x", debugger->ReadExtraMemory(memory, selection));
 			wxTheClipboard->SetData(new wxTextDataObject(StrToWxStr(temp)));
 			}
 			break;
 #endif
+
+		case IDM_WATCHADDRESS:
+			debugger->AddWatch(selection);
+			if (watch_window)
+				watch_window->NotifyUpdate();
+			Refresh();
+			break;
 
 		case IDM_TOGGLEMEMORY:
 			memory ^= 1;
@@ -207,21 +214,22 @@ void CMemoryView::OnPopupMenu(wxCommandEvent& event)
 void CMemoryView::OnMouseDownR(wxMouseEvent& event)
 {
 	// popup menu
-	wxMenu* menu = new wxMenu;
+	wxMenu menu;
 	//menu.Append(IDM_GOTOINMEMVIEW, _("&Goto in mem view"));
 #if wxUSE_CLIPBOARD
-	menu->Append(IDM_COPYADDRESS, _("Copy &address"));
-	menu->Append(IDM_COPYHEX, _("Copy &hex"));
+	menu.Append(IDM_COPYADDRESS, _("Copy &address"));
+	menu.Append(IDM_COPYHEX, _("Copy &hex"));
 #endif
-	menu->Append(IDM_TOGGLEMEMORY, _("Toggle &memory"));
+	menu.Append(IDM_WATCHADDRESS, _("Add to &watch"));
+	menu.Append(IDM_TOGGLEMEMORY, _("Toggle &memory"));
 
 	wxMenu* viewAsSubMenu = new wxMenu;
 	viewAsSubMenu->Append(IDM_VIEWASFP, _("FP value"));
 	viewAsSubMenu->Append(IDM_VIEWASASCII, "ASCII");
 	viewAsSubMenu->Append(IDM_VIEWASHEX, _("Hex"));
-	menu->AppendSubMenu(viewAsSubMenu, _("View As:"));
+	menu.AppendSubMenu(viewAsSubMenu, _("View As:"));
 
-	PopupMenu(menu);
+	PopupMenu(&menu);
 }
 
 void CMemoryView::OnPaint(wxPaintEvent& event)
@@ -309,31 +317,38 @@ void CMemoryView::OnPaint(wxPaintEvent& event)
 			dc.SetTextForeground(*wxBLACK);
 		}
 
+		if (!PowerPC::HostIsRAMAddress(address))
+			continue;
+
 		if (debugger->IsAlive())
 		{
-			char dis[256] = {0};
+			std::string dis;
 			u32 mem_data = debugger->ReadExtraMemory(memory, address);
 
 			if (viewAsType == VIEWAS_FP)
 			{
 				float flt = *(float *)(&mem_data);
-				sprintf(dis, "f: %f", flt);
+				dis = StringFromFormat("f: %f", flt);
 			}
 			else if (viewAsType == VIEWAS_ASCII)
 			{
-				u32 a[4] = {(mem_data&0xff000000)>>24,
-					(mem_data&0xff0000)>>16,
-					(mem_data&0xff00)>>8,
-					mem_data&0xff};
+				u32 a[4] = {
+					(mem_data & 0xff000000) >> 24,
+					(mem_data & 0xff0000) >> 16,
+					(mem_data & 0xff00) >> 8,
+					(mem_data & 0xff)
+				};
+
 				for (auto& word : a)
+				{
 					if (word == '\0')
 						word = ' ';
-				sprintf(dis, "%c%c%c%c", a[0], a[1], a[2], a[3]);
+				}
+
+				dis = StringFromFormat("%c%c%c%c", a[0], a[1], a[2], a[3]);
 			}
 			else if (viewAsType == VIEWAS_HEX)
 			{
-				dis[0] = 0;
-				dis[1] = 0;
 				u32 mema[8] = {
 					debugger->ReadExtraMemory(memory, address),
 					debugger->ReadExtraMemory(memory, address+4),
@@ -347,52 +362,46 @@ void CMemoryView::OnPaint(wxPaintEvent& event)
 
 				for (auto& word : mema)
 				{
-					char buf[32] = "";
 					switch (dataType)
 					{
 					case 0:
-						sprintf(buf, " %02X %02X %02X %02X",
-							((word&0xff000000)>>24)&0xFF,
-							((word&0xff0000)>>16)&0xFF,
-							((word&0xff00)>>8)&0xFF,
-							word&0xff);
+						dis += StringFromFormat(" %02X %02X %02X %02X",
+							((word & 0xff000000) >> 24) & 0xFF,
+							((word & 0xff0000) >> 16) & 0xFF,
+							((word & 0xff00) >> 8) & 0xFF,
+							word & 0xff);
 						break;
 					case 1:
-						sprintf(buf, " %02X%02X %02X%02X",
-							((word&0xff000000)>>24)&0xFF,
-							((word&0xff0000)>>16)&0xFF,
-							((word&0xff00)>>8)&0xFF,
-							word&0xff);
+						dis += StringFromFormat(" %02X%02X %02X%02X",
+							((word & 0xff000000) >> 24) & 0xFF,
+							((word & 0xff0000) >> 16) & 0xFF,
+							((word & 0xff00) >> 8) & 0xFF,
+							word & 0xff);
 						break;
 					case 2:
-						sprintf(buf, " %02X%02X%02X%02X",
-							((word&0xff000000)>>24)&0xFF,
-							((word&0xff0000)>>16)&0xFF,
-							((word&0xff00)>>8)&0xFF,
-							word&0xff);
+						dis += StringFromFormat(" %02X%02X%02X%02X",
+							((word & 0xff000000) >> 24) & 0xFF,
+							((word & 0xff0000) >> 16) & 0xFF,
+							((word & 0xff00) >> 8) & 0xFF,
+							word & 0xff);
 						break;
 					}
-					strcat(dis, buf);
 				}
-				curAddress += 32;
 			}
 			else
 			{
-				sprintf(dis, "INVALID VIEWAS TYPE");
+				dis = "INVALID VIEWAS TYPE";
 			}
 
-			char desc[256] = "";
 			if (viewAsType != VIEWAS_HEX)
 				dc.DrawText(StrToWxStr(dis), textPlacement + fontSize*(8 + 8), rowY1);
 			else
 				dc.DrawText(StrToWxStr(dis), textPlacement, rowY1);
 
-			if (desc[0] == 0)
-				strcpy(desc, debugger->GetDescription(address).c_str());
-
 			dc.SetTextForeground(*wxBLUE);
 
-			if (strlen(desc))
+			std::string desc = debugger->GetDescription(address);
+			if (!desc.empty())
 				dc.DrawText(StrToWxStr(desc), 17+fontSize*((8+8+8+30)*2), rowY1);
 
 			// Show blue memory check dot

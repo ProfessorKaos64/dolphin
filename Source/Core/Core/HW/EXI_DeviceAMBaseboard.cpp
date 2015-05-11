@@ -2,8 +2,10 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
+#include "Common/ChunkFile.h"
+#include "Common/Logging/Log.h"
 #include "Core/Core.h"
-
+#include "Core/HW/EXI.h"
 #include "Core/HW/EXI_Device.h"
 #include "Core/HW/EXI_DeviceAMBaseboard.h"
 
@@ -20,7 +22,7 @@ void CEXIAMBaseboard::SetCS(int cs)
 		m_position = 0;
 }
 
-bool CEXIAMBaseboard::IsPresent()
+bool CEXIAMBaseboard::IsPresent() const
 {
 	return true;
 }
@@ -58,7 +60,7 @@ void CEXIAMBaseboard::TransferByte(u8& _byte)
 
 	if ((m_position >= 2) && (m_command[0] == 0 && m_command[1] == 0))
 	{
-		_byte = "\x06\x04\x10\x00"[(m_position-2)&3];
+		_byte = "\x06\x04\x10\x00"[(m_position - 2) & 3];
 	}
 	else if (m_position == 3)
 	{
@@ -87,6 +89,7 @@ void CEXIAMBaseboard::TransferByte(u8& _byte)
 				m_have_irq = true;
 			else if (m_command[0] == 0x82)
 				m_have_irq = false;
+			ExpansionInterface::UpdateInterrupts();
 		}
 		else if (m_position > 4)
 		{

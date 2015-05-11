@@ -3,7 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "Common/ArmEmitter.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
@@ -17,6 +17,8 @@
 #include "Core/PowerPC/JitArm32/JitFPRCache.h"
 #include "Core/PowerPC/JitArm32/JitRegCache.h"
 
+using namespace ArmGen;
+
 void JitArm::Helper_UpdateCR1(ARMReg fpscr, ARMReg temp)
 {
 }
@@ -25,6 +27,7 @@ void JitArm::fctiwx(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITFloatingPointOff);
+	FALLBACK_IF(true);
 	u32 b = inst.FB;
 	u32 d = inst.FD;
 
@@ -117,7 +120,8 @@ void JitArm::fctiwx(UGeckoInstruction inst)
 	NEONXEmitter nemit(this);
 	nemit.VORR(vD, vD, V0);
 
-	if (inst.Rc) Helper_UpdateCR1(fpscrReg, rA);
+	if (inst.Rc)
+		Helper_UpdateCR1(fpscrReg, rA);
 
 	STR(fpscrReg, R9, PPCSTATE_OFF(fpscr));
 	gpr.Unlock(rA);
@@ -131,6 +135,8 @@ void JitArm::fctiwzx(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITFloatingPointOff);
+	FALLBACK_IF(true);
+
 	u32 b = inst.FB;
 	u32 d = inst.FD;
 
@@ -197,7 +203,8 @@ void JitArm::fctiwzx(UGeckoInstruction inst)
 	NEONXEmitter nemit(this);
 	nemit.VORR(vD, vD, V0);
 
-	if (inst.Rc) Helper_UpdateCR1(fpscrReg, rA);
+	if (inst.Rc)
+		Helper_UpdateCR1(fpscrReg, rA);
 
 	STR(fpscrReg, R9, PPCSTATE_OFF(fpscr));
 	gpr.Unlock(rA);
@@ -489,6 +496,8 @@ void JitArm::frsqrtex(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITPairedOff);
+	FALLBACK_IF(true);
+
 	FALLBACK_IF(inst.Rc);
 
 	u32 b = inst.FB, d = inst.FD;

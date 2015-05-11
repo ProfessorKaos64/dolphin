@@ -4,7 +4,7 @@
 
 #include "Common/Atomic.h"
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FPURoundMode.h"
 #include "Common/MathUtil.h"
 #include "Common/Thread.h"
@@ -20,8 +20,8 @@
 #include "VideoBackends/Software/SWCommandProcessor.h"
 #include "VideoBackends/Software/VideoBackend.h"
 
-#include "VideoCommon/DataReader.h"
 #include "VideoCommon/Fifo.h"
+#include "VideoCommon/VertexLoaderUtils.h"
 
 namespace SWCommandProcessor
 {
@@ -57,23 +57,15 @@ void DoState(PointerWrap &p)
 	p.Do(interruptWaiting);
 
 	// Is this right?
-	p.DoArray(g_pVideoData,writePos);
+	p.DoArray(g_video_buffer_read_ptr,writePos);
 }
-
-// does it matter that there is no synchronization between threads during writes?
-inline void WriteLow (u32& _reg, u16 lowbits)  {_reg = (_reg & 0xFFFF0000) | lowbits;}
-inline void WriteHigh(u32& _reg, u16 highbits) {_reg = (_reg & 0x0000FFFF) | ((u32)highbits << 16);}
-
-inline u16 ReadLow  (u32 _reg)  {return (u16)(_reg & 0xFFFF);}
-inline u16 ReadHigh (u32 _reg)  {return (u16)(_reg >> 16);}
-
 
 static void UpdateInterrupts_Wrapper(u64 userdata, int cyclesLate)
 {
 	UpdateInterrupts(userdata);
 }
 
-inline bool AtBreakpoint()
+static inline bool AtBreakpoint()
 {
 	return cpreg.ctrl.BPEnable && (cpreg.readptr == cpreg.breakpt);
 }
@@ -103,7 +95,7 @@ void Init()
 	interruptSet = false;
 	interruptWaiting = false;
 
-	g_pVideoData = nullptr;
+	g_video_buffer_read_ptr = nullptr;
 	g_bSkipCurrentFrame = false;
 }
 
@@ -132,7 +124,7 @@ void RunGpu()
 void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
 {
 	// Directly map reads and writes to the cpreg structure.
-	for (size_t i = 0; i < sizeof (cpreg) / sizeof (u16); ++i)
+	for (u32 i = 0; i < sizeof (cpreg) / sizeof (u16); ++i)
 	{
 		u16* ptr = ((u16*)&cpreg) + i;
 		mmio->Register(base | (i * 2),
@@ -143,7 +135,7 @@ void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
 
 	// Bleh. Apparently SWCommandProcessor does not know about regs 0x40 to
 	// 0x64...
-	for (size_t i = 0x40; i < 0x64; ++i)
+	for (u32 i = 0x40; i < 0x64; ++i)
 	{
 		mmio->Register(base | i,
 			MMIO::Constant<u16>(0),
@@ -182,7 +174,7 @@ void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
 	);
 }
 
-void STACKALIGN GatherPipeBursted()
+void GatherPipeBursted()
 {
 	if (cpreg.ctrl.GPLinkEnable)
 	{
@@ -319,7 +311,7 @@ bool RunBuffer()
 
 	_dbg_assert_(COMMANDPROCESSOR, writePos >= readPos);
 
-	g_pVideoData = &commandBuffer[readPos];
+	g_video_buffer_read_ptr = &commandBuffer[readPos];
 
 	u32 availableBytes = writePos - readPos;
 
@@ -330,7 +322,7 @@ bool RunBuffer()
 		OpcodeDecoder::Run(availableBytes);
 
 		// if data was read by the opcode decoder then the video data pointer changed
-		readPos = (u32)(g_pVideoData - &commandBuffer[0]);
+		readPos = (u32)(g_video_buffer_read_ptr - &commandBuffer[0]);
 		_dbg_assert_(VIDEO, writePos >= readPos);
 		availableBytes = writePos - readPos;
 	}

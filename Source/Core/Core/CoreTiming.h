@@ -18,12 +18,16 @@
 //   ScheduleEvent(periodInCycles - cyclesLate, callback, "whatever")
 
 #include <string>
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 class PointerWrap;
 
 namespace CoreTiming
 {
+
+extern s64 globalTimer;
+extern u64 fakeTBStartValue;
+extern u64 fakeTBStartTicks;
 
 void Init();
 void Shutdown();
@@ -39,11 +43,11 @@ void DoState(PointerWrap &p);
 int RegisterEvent(const std::string& name, TimedCallback callback);
 void UnregisterAllEvents();
 
-// userdata MAY NOT CONTAIN POINTERS. userdata might get written and reloaded from disk,
-// when we implement state saves.
-void ScheduleEvent(int cyclesIntoFuture, int event_type, u64 userdata=0);
-void ScheduleEvent_Threadsafe(int cyclesIntoFuture, int event_type, u64 userdata=0);
-void ScheduleEvent_Threadsafe_Immediate(int event_type, u64 userdata=0);
+// userdata MAY NOT CONTAIN POINTERS. userdata might get written and reloaded from savestates.
+void ScheduleEvent(int cyclesIntoFuture, int event_type, u64 userdata = 0);
+void ScheduleEvent_Immediate(int event_type, u64 userdata = 0);
+void ScheduleEvent_Threadsafe(int cyclesIntoFuture, int event_type, u64 userdata = 0);
+void ScheduleEvent_Threadsafe_Immediate(int event_type, u64 userdata = 0);
 
 // We only permit one event of each type in the queue at a time.
 void RemoveEvent(int event_type);
@@ -80,4 +84,4 @@ void ForceExceptionCheck(int cycles);
 
 extern int slicelength;
 
-}; // end of namespace
+} // end of namespace

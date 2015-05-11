@@ -136,7 +136,8 @@ public:
 		std::string name;
 		name += c;
 
-		while (it != expr.end()) {
+		while (it != expr.end())
+		{
 			c = *it;
 			if (!isalpha(c))
 				break;
@@ -218,6 +219,33 @@ public:
 	virtual operator std::string() { return ""; }
 };
 
+class DummyExpression : public ExpressionNode
+{
+public:
+	std::string name;
+
+	DummyExpression(const std::string& name_) : name(name_) {}
+
+	ControlState GetValue() override
+	{
+		return 0.0;
+	}
+
+	void SetValue(ControlState value) override
+	{
+	}
+
+	int CountNumControls() override
+	{
+		return 0;
+	}
+
+	operator std::string() override
+	{
+		return "`" + name + "`";
+	}
+};
+
 class ControlExpression : public ExpressionNode
 {
 public:
@@ -272,7 +300,7 @@ public:
 		case TOK_OR:
 			return std::max(lhsValue, rhsValue);
 		case TOK_ADD:
-			return std::min(lhsValue + rhsValue, 1.0f);
+			return std::min(lhsValue + rhsValue, 1.0);
 		default:
 			assert(false);
 			return 0;
@@ -316,7 +344,7 @@ public:
 		switch (op)
 		{
 		case TOK_NOT:
-			return 1.0f - value;
+			return 1.0 - value;
 		default:
 			assert(false);
 			return 0;
@@ -328,7 +356,7 @@ public:
 		switch (op)
 		{
 		case TOK_NOT:
-			inner->SetValue(1.0f - value);
+			inner->SetValue(1.0 - value);
 		default:
 			assert(false);
 		}
@@ -415,7 +443,10 @@ private:
 			{
 				Device::Control *control = finder.FindControl(tok.qualifier);
 				if (control == nullptr)
-					return EXPRESSION_PARSE_NO_DEVICE;
+				{
+					*expr_out = new DummyExpression(tok.qualifier);
+					return EXPRESSION_PARSE_SUCCESS;
+				}
 
 				*expr_out = new ControlExpression(tok.qualifier, control);
 				return EXPRESSION_PARSE_SUCCESS;
@@ -569,7 +600,8 @@ ExpressionParseStatus ParseExpression(std::string str, ControlFinder &finder, Ex
 	qualifier.has_device = false;
 
 	Device::Control *control = finder.FindControl(qualifier);
-	if (control) {
+	if (control)
+	{
 		*expr_out = new Expression(new ControlExpression(qualifier, control));
 		return EXPRESSION_PARSE_SUCCESS;
 	}

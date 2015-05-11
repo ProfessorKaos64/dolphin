@@ -5,14 +5,9 @@
 #pragma once
 
 #include <cstring>
-#include <wx/defs.h>
 #include <wx/grid.h>
-#include <wx/string.h>
-#include <wx/windowid.h>
 
 #include "Common/CommonTypes.h"
-
-class wxWindow;
 
 class CDSPRegTable : public wxGridTableBase
 {
@@ -30,9 +25,9 @@ public:
 		memset(m_CachedRegHasChanged, 0, sizeof(m_CachedRegHasChanged));
 	}
 
-	int GetNumberCols(void) override {return 2;}
-	int GetNumberRows(void) override {return 32;}
-	bool IsEmptyCell(int row, int col) override {return false;}
+	int GetNumberCols() override { return 2; }
+	int GetNumberRows() override { return 32; }
+	bool IsEmptyCell(int row, int col) override { return false; }
 	wxString GetValue(int row, int col) override;
 	void SetValue(int row, int col, const wxString &) override;
 	wxGridCellAttr *GetAttr(int, int, wxGridCellAttr::wxAttrKind) override;
@@ -42,6 +37,10 @@ public:
 class DSPRegisterView : public wxGrid
 {
 public:
-	DSPRegisterView(wxWindow* parent, wxWindowID id);
+	DSPRegisterView(wxWindow* parent, wxWindowID id = wxID_ANY);
 	void Update() override;
+
+private:
+	// Owned by wx. Deleted implicitly upon destruction.
+	CDSPRegTable* m_register_table;
 };

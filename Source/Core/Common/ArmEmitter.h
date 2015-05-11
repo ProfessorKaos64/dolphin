@@ -8,8 +8,9 @@
 
 #include <vector>
 
+#include "Common/ArmCommon.h"
 #include "Common/CodeBlock.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #if defined(__SYMBIAN32__) || defined(PANDORA)
 #include <signal.h>
@@ -60,28 +61,6 @@ enum ARMReg
 	Q8, Q9, Q10, Q11, Q12, Q13, Q14, Q15,
 	INVALID_REG = 0xFFFFFFFF
 };
-
-enum CCFlags
-{
-	CC_EQ = 0, // Equal
-	CC_NEQ, // Not equal
-	CC_CS, // Carry Set
-	CC_CC, // Carry Clear
-	CC_MI, // Minus (Negative)
-	CC_PL, // Plus
-	CC_VS, // Overflow
-	CC_VC, // No Overflow
-	CC_HI, // Unsigned higher
-	CC_LS, // Unsigned lower or same
-	CC_GE, // Signed greater than or equal
-	CC_LT, // Signed less than
-	CC_GT, // Signed greater than
-	CC_LE, // Signed less than or equal
-	CC_AL, // Always (unconditional) 14
-	CC_HS = CC_CS, // Alias of CC_CS  Unsigned higher or same
-	CC_LO = CC_CC, // Alias of CC_CC  Unsigned lower
-};
-const u32 NO_COND = 0xE0000000;
 
 enum ShiftType
 {
@@ -369,10 +348,10 @@ protected:
 	inline void Write32(u32 value) {*(u32*)code = value; code+=4;}
 
 public:
-	ARMXEmitter() : code(0), startcode(0), lastCacheFlushEnd(0) {
+	ARMXEmitter() : code(nullptr), startcode(nullptr), lastCacheFlushEnd(nullptr) {
 		condition = CC_AL << 28;
 	}
-	ARMXEmitter(u8 *code_ptr) {
+	ARMXEmitter(u8* code_ptr) {
 		code = code_ptr;
 		lastCacheFlushEnd = code_ptr;
 		startcode = code_ptr;
@@ -406,8 +385,12 @@ public:
 	// Hint instruction
 	void YIELD();
 
+	// System
+	void MRC(u32 coproc, u32 opc1, ARMReg Rt, u32 CRn, u32 CRm, u32 opc2 = 0);
+	void MCR(u32 coproc, u32 opc1, ARMReg Rt, u32 CRn, u32 CRm, u32 opc2 = 0);
+
 	// Do nothing
-	void NOP(int count = 1); //nop padding - TODO: fast nop slides, for amd and intel (check their manuals)
+	void NOP(int count = 1); //nop padding - TODO: fast nop slides, for AMD and Intel (check their manuals)
 
 #ifdef CALL
 #undef CALL
@@ -493,7 +476,7 @@ public:
 	void UBFX(ARMReg dest, ARMReg op2, u8 lsb, u8 width);
 	void CLZ(ARMReg rd, ARMReg rm);
 
-	// Using just MSR here messes with our defines on the PPC side of stuff (when this code was in dolphin...)
+	// Using just MSR here messes with our defines on the PPC side of stuff (when this code was in Dolphin...)
 	// Just need to put an underscore here, bit annoying.
 	void _MSR (bool nzcvq, bool g, Operand2 op2);
 	void _MSR (bool nzcvq, bool g, ARMReg src);
@@ -706,7 +689,7 @@ private:
 	void PoisonMemory() override
 	{
 		u32* ptr = (u32*)region;
-		u32* maxptr = (u32*)region + region_size;
+		u32* maxptr = (u32*)(region + region_size);
 		// If our memory isn't a multiple of u32 then this won't write the last remaining bytes with anything
 		// Less than optimal, but there would be nothing we could do but throw a runtime warning anyway.
 		// ARM: 0x01200070 = BKPT 0

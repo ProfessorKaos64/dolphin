@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/NandPaths.h"
 #include "Common/StringUtil.h"
@@ -101,7 +101,7 @@ void ReadReplacements(replace_v& replacements)
 	std::string replacement;
 
 	while (f >> letter >> replacement && replacement.size())
-		replacements.push_back(std::make_pair(letter, replacement));
+		replacements.emplace_back(letter, replacement);
 }
 
-};
+}

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "DiscIO/Volume.h"
 
 namespace DiscIO
@@ -64,11 +64,11 @@ public:
 };
 
 
-// we open the NAND Content files to often... lets cache them
+// we open the NAND Content files too often... let's cache them
 class CNANDContentManager
 {
 public:
-	static CNANDContentManager& Access() { return m_Instance; }
+	static CNANDContentManager& Access() { static CNANDContentManager instance; return instance; }
 	u64 Install_WiiWAD(std::string &fileName);
 
 	const INANDContentLoader& GetNANDLoader(const std::string& _rName, bool forceReload = false);
@@ -76,10 +76,11 @@ public:
 	bool RemoveTitle(u64 _titleID);
 
 private:
-	CNANDContentManager() {};
+	CNANDContentManager() {}
 	~CNANDContentManager();
 
-	static CNANDContentManager m_Instance;
+	CNANDContentManager(CNANDContentManager const&) = delete;
+	void operator=(CNANDContentManager const&) = delete;
 
 	typedef std::map<std::string, INANDContentLoader*> CNANDContentMap;
 	CNANDContentMap m_Map;
@@ -88,7 +89,7 @@ private:
 class CSharedContent
 {
 public:
-	static CSharedContent& AccessInstance() { return m_Instance; }
+	static CSharedContent& AccessInstance() { static CSharedContent instance; return instance; }
 
 	std::string GetFilenameFromSHA1(const u8* _pHash);
 	std::string AddSharedContent(const u8* _pHash);
@@ -98,6 +99,9 @@ private:
 	CSharedContent();
 	virtual ~CSharedContent();
 
+	CSharedContent(CSharedContent const&) = delete;
+	void operator=(CSharedContent const&) = delete;
+
 #pragma pack(push,1)
 	struct SElement
 	{
@@ -106,16 +110,15 @@ private:
 	};
 #pragma pack(pop)
 
-	u32 lastID;
-	std::string contentMap;
+	u32 m_lastID;
+	std::string m_contentMap;
 	std::vector<SElement> m_Elements;
-	static CSharedContent m_Instance;
 };
 
 class cUIDsys
 {
 public:
-	static cUIDsys& AccessInstance() { return m_Instance; }
+	static cUIDsys& AccessInstance() { static cUIDsys instance; return instance; }
 
 	u32 GetUIDFromTitle(u64 _Title);
 	void AddTitle(u64 _Title);
@@ -126,6 +129,9 @@ private:
 	cUIDsys();
 	virtual ~cUIDsys();
 
+	cUIDsys(cUIDsys const&) = delete;
+	void operator=(cUIDsys const&) = delete;
+
 #pragma pack(push,1)
 	struct SElement
 	{
@@ -134,10 +140,9 @@ private:
 	};
 #pragma pack(pop)
 
-	u32 lastUID;
-	std::string uidSys;
+	u32 m_lastUID;
+	std::string m_uidSys;
 	std::vector<SElement> m_Elements;
-	static cUIDsys m_Instance;
 };
 
 }

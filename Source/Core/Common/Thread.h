@@ -4,14 +4,14 @@
 
 #pragma once
 
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
+#include <thread>
 
-// Don't include common.h here as it will break LogManager
+// Don't include Common.h here as it will break LogManager
 #include "Common/CommonTypes.h"
-#include "Common/StdConditionVariable.h"
-#include "Common/StdMutex.h"
-#include "Common/StdThread.h"
 
 // This may not be defined outside _WIN32
 #ifndef _WIN32
@@ -32,7 +32,7 @@ int CurrentThreadId();
 void SetThreadAffinity(std::thread::native_handle_type thread, u32 mask);
 void SetCurrentThreadAffinity(u32 mask);
 
-// TODO: doesn't work on windows with (count > 2)
+// TODO: doesn't work on Windows with (count > 2)
 class Barrier
 {
 public:

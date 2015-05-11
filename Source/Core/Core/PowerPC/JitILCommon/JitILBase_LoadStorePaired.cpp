@@ -2,14 +2,14 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Core/PowerPC/JitILCommon/JitILBase.h"
 
 void JitILBase::psq_st(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStorePairedOff);
-	FALLBACK_IF(js.memcheck || inst.W);
+	FALLBACK_IF(jo.memcheck || inst.W);
 
 	IREmitter::InstLoc addr = ibuild.EmitIntConst(inst.SIMM_12);
 	IREmitter::InstLoc val;
@@ -29,7 +29,7 @@ void JitILBase::psq_l(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStorePairedOff);
-	FALLBACK_IF(js.memcheck || inst.W);
+	FALLBACK_IF(jo.memcheck || inst.W);
 
 	IREmitter::InstLoc addr = ibuild.EmitIntConst(inst.SIMM_12);
 	IREmitter::InstLoc val;

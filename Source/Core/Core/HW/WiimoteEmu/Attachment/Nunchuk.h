@@ -9,6 +9,8 @@
 namespace WiimoteEmu
 {
 
+struct ExtensionReg;
+
 class Nunchuk : public Attachment
 {
 public:
@@ -20,6 +22,19 @@ public:
 	{
 		BUTTON_C = 0x02,
 		BUTTON_Z = 0x01,
+	};
+
+	enum
+	{
+		ACCEL_ZERO_G = 0x80,
+		ACCEL_ONE_G = 0xB3,
+		ACCEL_RANGE = (ACCEL_ONE_G - ACCEL_ZERO_G),
+	};
+
+	enum
+	{
+		STICK_CENTER = 0x80,
+		STICK_RADIUS = 0x7F,
 	};
 
 	void LoadDefaults(const ControllerInterface& ciface) override;

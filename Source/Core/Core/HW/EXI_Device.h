@@ -4,10 +4,11 @@
 
 #pragma once
 
-#include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 
-enum TEXIDevices
+class PointerWrap;
+
+enum TEXIDevices : int
 {
 	EXIDEVICE_DUMMY,
 	EXIDEVICE_MEMORYCARD,
@@ -19,6 +20,7 @@ enum TEXIDevices
 	EXIDEVICE_GECKO,
 	EXIDEVICE_MEMORYCARDFOLDER, // Only used when creating a device by EXIDevice_Create
 	                            // Converted to EXIDEVICE_MEMORYCARD internally
+	EXIDEVICE_AGP,
 	EXIDEVICE_NONE = (u8)-1
 };
 
@@ -38,9 +40,9 @@ public:
 	virtual void DMAWrite(u32 _uAddr, u32 _uSize);
 	virtual void DMARead (u32 _uAddr, u32 _uSize);
 
-	virtual bool UseDelayedTransferCompletion() {return false;}
+	virtual bool UseDelayedTransferCompletion() const { return false; }
 
-	virtual bool IsPresent() {return false;}
+	virtual bool IsPresent() const { return false; }
 	virtual void SetCS(int) {}
 	virtual void DoState(PointerWrap&) {}
 	virtual void PauseAndLock(bool doLock, bool unpauseOnUnlock=true) {}

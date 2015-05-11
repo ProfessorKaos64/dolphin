@@ -6,6 +6,8 @@
 
 #include "Core/IPC_HLE/WII_IPC_HLE_Device.h"
 
+class PointerWrap;
+
 struct NANDStat
 {
 	u32 BlockSize;
@@ -38,13 +40,11 @@ public:
 
 	virtual void DoState(PointerWrap& p) override;
 
-	virtual bool Open(u32 _CommandAddress, u32 _Mode) override;
-	virtual bool Close(u32 _CommandAddress, bool _bForce) override;
+	virtual IPCCommandResult Open(u32 _CommandAddress, u32 _Mode) override;
+	virtual IPCCommandResult Close(u32 _CommandAddress, bool _bForce) override;
 
-	virtual bool IOCtl(u32 _CommandAddress) override;
-	virtual bool IOCtlV(u32 _CommandAddress) override;
-
-	virtual int GetCmdDelay(u32) override;
+	virtual IPCCommandResult IOCtl(u32 _CommandAddress) override;
+	virtual IPCCommandResult IOCtlV(u32 _CommandAddress) override;
 
 private:
 

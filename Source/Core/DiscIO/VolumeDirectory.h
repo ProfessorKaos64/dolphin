@@ -5,6 +5,7 @@
 #pragma once
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -31,20 +32,22 @@ public:
 
 	static bool IsValidDirectory(const std::string& _rDirectory);
 
-	bool Read(u64 _Offset, u64 _Length, u8* _pBuffer) const override;
-	bool RAWRead(u64 _Offset, u64 _Length, u8* _pBuffer) const override;
+	bool Read(u64 _Offset, u64 _Length, u8* _pBuffer, bool decrypt) const override;
 
 	std::string GetUniqueID() const override;
-	void SetUniqueID(std::string _ID);
+	void SetUniqueID(const std::string& _ID);
 
 	std::string GetMakerID() const override;
 
-	std::vector<std::string> GetNames() const override;
-	void SetName(std::string);
+	int GetRevision() const override { return 0; }
+	std::string GetName() const override;
+	std::map<IVolume::ELanguage, std::string> GetNames() const override;
+	void SetName(const std::string&);
 
 	u32 GetFSTSize() const override;
 
 	std::string GetApploaderDate() const override;
+	bool IsWiiDisc() const override;
 
 	ECountry GetCountry() const override;
 
@@ -64,12 +67,12 @@ private:
 	void SetDOL(const std::string& _rDOL);
 
 	// writing to read buffer
-	void WriteToBuffer(u64 _SrcStartAddress, u64 _SrcLength, u8* _Src,
+	void WriteToBuffer(u64 _SrcStartAddress, u64 _SrcLength, const u8* _Src,
 					   u64& _Address, u64& _Length, u8*& _pBuffer) const;
 
 	void PadToAddress(u64 _StartAddress, u64& _Address, u64& _Length, u8*& _pBuffer) const;
 
-	void Write32(u32 data, u32 offset, u8* buffer);
+	void Write32(u32 data, u32 offset, std::vector<u8>* const buffer);
 
 	// FST creation
 	void WriteEntryData(u32& entryOffset, u8 type, u32 nameOffset, u64 dataOffset, u32 length);
@@ -85,17 +88,18 @@ private:
 
 	u32 m_totalNameSize;
 
-	// gc has no shift, wii has 2 bit shift
+	bool m_is_wii;
+
+	// GameCube has no shift, Wii has 2 bit shift
 	u32 m_addressShift;
 
 	// first address on disk containing file data
 	u64 m_dataStartAddress;
 
 	u64 m_fstNameOffset;
-	u64 m_fstSize;
-	u8* m_FSTData;
+	std::vector<u8> m_FSTData;
 
-	u8* m_diskHeader;
+	std::vector<u8> m_diskHeader;
 
 	#pragma pack(push, 1)
 	struct SDiskHeaderInfo
@@ -106,31 +110,32 @@ private:
 		u32 debug_flag;
 		u32 track_location;
 		u32 track_size;
-		u32 countrycode;
+		u32 country_code;
 		u32 unknown;
 		u32 unknown2;
 
 		// All the data is byteswapped
-		SDiskHeaderInfo() {
+		SDiskHeaderInfo()
+		{
 			debug_mntr_size = 0;
 			simulated_mem_size = 0;
 			arg_offset = 0;
 			debug_flag = 0;
 			track_location = 0;
 			track_size = 0;
-			countrycode = 0;
+			country_code = 0;
 			unknown = 0;
 			unknown2 = 0;
 		}
 	};
 	#pragma pack(pop)
-	SDiskHeaderInfo* m_diskHeaderInfo;
+	std::unique_ptr<SDiskHeaderInfo> m_diskHeaderInfo;
 
-	u64 m_apploaderSize;
-	u8* m_apploader;
+	std::vector<u8> m_apploader;
+	std::vector<u8> m_DOL;
 
-	u64 m_DOLSize;
-	u8* m_DOL;
+	u64 m_fst_address;
+	u64 m_dol_address;
 
 	static const u8 ENTRY_SIZE = 0x0c;
 	static const u8 FILE_ENTRY = 0;
@@ -139,8 +144,6 @@ private:
 	static const u64 DISKHEADERINFO_ADDRESS = 0x440;
 	static const u64 APPLOADER_ADDRESS = 0x2440;
 	static const u32 MAX_NAME_LENGTH = 0x3df;
-	u64 FST_ADDRESS;
-	u64 DOL_ADDRESS;
 };
 
 } // namespace

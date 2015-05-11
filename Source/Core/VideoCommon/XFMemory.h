@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "VideoCommon/CPMemory.h"
+#include "VideoCommon/DataReader.h"
 
 
 // Lighting
@@ -43,10 +44,10 @@
 #define LIGHTDIF_SIGN  1
 #define LIGHTDIF_CLAMP 2
 
-#define LIGHTATTN_SPEC 0 // specular attenuation
-#define LIGHTATTN_SPOT 1 // distance/spotlight attenuation
-#define LIGHTATTN_NONE 2
-#define LIGHTATTN_DIR  3
+#define LIGHTATTN_NONE 0 // no attenuation
+#define LIGHTATTN_SPEC 1 // point light attenuation
+#define LIGHTATTN_DIR  2 // directional light attenuation
+#define LIGHTATTN_SPOT 3 // spot light attenuation
 
 #define GX_PERSPECTIVE  0
 #define GX_ORTHOGRAPHIC 1
@@ -273,5 +274,6 @@ struct XFMemory
 
 extern XFMemory xfmem;
 
-void LoadXFReg(u32 transferSize, u32 address, u32 *pData);
+void LoadXFReg(u32 transferSize, u32 address, DataReader src);
 void LoadIndexedXF(u32 val, int array);
+void PreprocessIndexedXF(u32 val, int refarray);

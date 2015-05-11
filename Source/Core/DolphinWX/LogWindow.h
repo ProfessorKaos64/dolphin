@@ -8,16 +8,11 @@
 #include <queue>
 #include <utility>
 #include <vector>
-#include <wx/defs.h>
-#include <wx/event.h>
 #include <wx/font.h>
-#include <wx/gdicmn.h>
 #include <wx/panel.h>
-#include <wx/string.h>
-#include <wx/translation.h>
-#include <wx/windowid.h>
+#include <wx/timer.h>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/Logging/LogManager.h"
 
 class CFrame;
@@ -25,25 +20,12 @@ class wxBoxSizer;
 class wxCheckBox;
 class wxChoice;
 class wxTextCtrl;
-class wxTimer;
-class wxTimerEvent;
-
-enum
-{
-	IDM_LOG,
-	IDM_CLEARLOG,
-	IDM_TOGGLEALL,
-	IDM_WRAPLINE,
-	IDTM_UPDATELOG,
-	IDM_FONT,
-	IDM_SUBMITCMD
-};
 
 // Uses multiple inheritance - only sane because LogListener is a pure virtual interface.
 class CLogWindow : public wxPanel, LogListener
 {
 public:
-	CLogWindow(CFrame *parent,
+	CLogWindow(CFrame* parent,
 		wxWindowID id = wxID_ANY,
 		const wxPoint& pos = wxDefaultPosition,
 		const wxSize& size = wxDefaultSize,
@@ -58,26 +40,25 @@ public:
 	int x, y, winpos;
 
 private:
-	CFrame *Parent;
+	CFrame* Parent;
 	wxFont DefaultFont, MonoSpaceFont;
 	std::vector<wxFont> LogFont;
-	wxTimer *m_LogTimer;
-	bool m_ignoreLogTimer;
-	LogManager *m_LogManager;
+	wxTimer m_LogTimer;
+	LogManager* m_LogManager;
 	std::queue<std::pair<u8, wxString> > msgQueue;
-	bool m_writeFile, m_writeWindow, m_writeDebugger, m_LogAccess;
+	bool m_writeFile, m_writeWindow, m_LogAccess;
 
 	// Controls
-	wxBoxSizer *sBottom;
-	wxTextCtrl *m_Log, *m_cmdline;
-	wxChoice *m_FontChoice;
-	wxCheckBox *m_WrapLine;
+	wxBoxSizer* sBottom;
+	wxTextCtrl* m_Log;
+	wxTextCtrl* m_cmdline;
+	wxChoice* m_FontChoice;
+	wxCheckBox* m_WrapLine;
+	wxButton* m_clear_log_btn;
 
 	std::mutex m_LogSection;
 
-	DECLARE_EVENT_TABLE()
-
-	wxTextCtrl * CreateTextCtrl(wxPanel* parent, wxWindowID id, long Style);
+	wxTextCtrl* CreateTextCtrl(wxPanel* parent, wxWindowID id, long Style);
 	void CreateGUIControls();
 	void PopulateBottom();
 	void UnPopulateBottom();
@@ -87,7 +68,4 @@ private:
 	void OnClear(wxCommandEvent& event);
 	void OnLogTimer(wxTimerEvent& WXUNUSED(event));
 	void UpdateLog();
-
-	// LogListener
-	const char *getName() const { return "LogWindow"; }
 };

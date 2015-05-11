@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "Common/CDUtils.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 
 #ifdef _WIN32
@@ -72,64 +72,59 @@ std::vector<std::string> cdio_get_devices()
 	CFMutableDictionaryRef classes_to_match;
 	std::vector<std::string> drives;
 
-	kern_result = IOMasterPort( MACH_PORT_NULL, &master_port );
+	kern_result = IOMasterPort(MACH_PORT_NULL, &master_port);
 	if (kern_result != KERN_SUCCESS)
-		return( drives );
+		return drives;
 
-	classes_to_match = IOServiceMatching( kIOCDMediaClass );
+	classes_to_match = IOServiceMatching(kIOCDMediaClass);
 	if (classes_to_match == nullptr)
-		return( drives );
+		return drives;
 
-	CFDictionarySetValue( classes_to_match,
-		CFSTR(kIOMediaEjectableKey), kCFBooleanTrue );
+	CFDictionarySetValue(classes_to_match,
+		CFSTR(kIOMediaEjectableKey), kCFBooleanTrue);
 
-	kern_result = IOServiceGetMatchingServices( master_port,
-		classes_to_match, &media_iterator );
+	kern_result = IOServiceGetMatchingServices(master_port,
+		classes_to_match, &media_iterator);
 	if (kern_result != KERN_SUCCESS)
-		return( drives );
+		return drives;
 
-	next_media = IOIteratorNext( media_iterator );
+	next_media = IOIteratorNext(media_iterator);
 	if (next_media != 0)
 	{
-		char psz_buf[0x32];
-		size_t dev_path_length;
 		CFTypeRef str_bsd_path;
 
 		do
 		{
 			str_bsd_path =
-				IORegistryEntryCreateCFProperty( next_media,
-					CFSTR( kIOBSDNameKey ), kCFAllocatorDefault,
-					0 );
+				IORegistryEntryCreateCFProperty(next_media,
+					CFSTR(kIOBSDNameKey), kCFAllocatorDefault,
+					0);
 			if (str_bsd_path == nullptr)
 			{
-				IOObjectRelease( next_media );
+				IOObjectRelease(next_media);
 				continue;
 			}
 
-			// Below, by appending 'r' to the BSD node name, we indicate
-			// a raw disk. Raw disks receive I/O requests directly and
-			// don't go through a buffer cache.
-			snprintf( psz_buf, sizeof(psz_buf), "%s%c", _PATH_DEV, 'r' );
-			dev_path_length = strlen( psz_buf );
-
-			if (CFStringGetCString( (CFStringRef)str_bsd_path,
-				(char*)&psz_buf + dev_path_length,
-				sizeof(psz_buf) - dev_path_length,
-				kCFStringEncodingASCII))
+			if (CFGetTypeID(str_bsd_path) == CFStringGetTypeID())
 			{
-				if (psz_buf != nullptr)
-				{
-					std::string str = psz_buf;
-					drives.push_back(str);
-				}
-			}
-			CFRelease( str_bsd_path );
-			IOObjectRelease( next_media );
+				size_t buf_size = CFStringGetLength((CFStringRef)str_bsd_path) * 4 + 1;
+				char* buf = new char[buf_size];
 
-		} while (( next_media = IOIteratorNext( media_iterator ) ) != 0);
+				if (CFStringGetCString((CFStringRef)str_bsd_path, buf, buf_size, kCFStringEncodingUTF8))
+				{
+					// Below, by appending 'r' to the BSD node name, we indicate
+					// a raw disk. Raw disks receive I/O requests directly and
+					// don't go through a buffer cache.
+					drives.push_back(std::string(_PATH_DEV "r") + buf);
+				}
+
+				delete[] buf;
+			}
+			CFRelease(str_bsd_path);
+			IOObjectRelease(next_media);
+		} while ((next_media = IOIteratorNext(media_iterator)) != 0);
 	}
-	IOObjectRelease( media_iterator );
+	IOObjectRelease(media_iterator);
 	return drives;
 }
 #else
@@ -170,11 +165,11 @@ static bool is_cdrom(const std::string& drive, char *mnttype)
 {
 	// Check if the device exists
 	if (!is_device(drive))
-		return(false);
+		return false;
 
-	bool is_cd=false;
+	bool is_cd = false;
 	// If it does exist, verify that it is a cdrom/dvd drive
-	int cdfd = open(drive.c_str(), (O_RDONLY|O_NONBLOCK), 0);
+	int cdfd = open(drive.c_str(), (O_RDONLY | O_NONBLOCK), 0);
 	if (cdfd >= 0)
 	{
 #ifdef __linux__
@@ -183,11 +178,11 @@ static bool is_cdrom(const std::string& drive, char *mnttype)
 			is_cd = true;
 		close(cdfd);
 	}
-	return(is_cd);
+	return is_cd;
 }
 
 // Returns a pointer to an array of strings with the device names
-std::vector<std::string> cdio_get_devices ()
+std::vector<std::string> cdio_get_devices()
 {
 	std::vector<std::string> drives;
 	// Scan the system for DVD/CD-ROM drives.

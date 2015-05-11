@@ -3,7 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Core/HW/Memmap.h"
 #include "VideoBackends/Software/BPMemLoader.h"
 #include "VideoBackends/Software/CPMemLoader.h"
@@ -14,8 +14,8 @@
 #include "VideoBackends/Software/SWVertexLoader.h"
 #include "VideoBackends/Software/SWVideoConfig.h"
 #include "VideoBackends/Software/XFMemLoader.h"
-#include "VideoCommon/DataReader.h"
 #include "VideoCommon/Fifo.h"
+#include "VideoCommon/VertexLoaderUtils.h"
 
 typedef void (*DecodingFunction)(u32);
 
@@ -34,7 +34,7 @@ static u8 lastPrimCmd;
 void DoState(PointerWrap &p)
 {
 	p.Do(minCommandSize);
-	// Not sure what is wrong with this. Something(s) in here is causing dolphin to crash/hang when loading states saved from another run of dolphin. Doesn't seem too important anyway...
+	// Not sure what is wrong with this. Something(s) in here is causing Dolphin to crash/hang when loading states saved from another run of Dolphin. Doesn't seem too important anyway...
 	//vertexLoader.DoState(p);
 	p.Do(readOpcode);
 	p.Do(inObjectStream);
@@ -57,7 +57,7 @@ static void DecodePrimitiveStream(u32 iBufferSize)
 	{
 		while (streamSize > 0 && iBufferSize >= vertexSize)
 		{
-			g_pVideoData += vertexSize;
+			g_video_buffer_read_ptr += vertexSize;
 			iBufferSize -= vertexSize;
 			streamSize--;
 		}
@@ -94,26 +94,26 @@ static void ReadXFData(u32 iBufferSize)
 
 static void ExecuteDisplayList(u32 addr, u32 count)
 {
-	u8 *videoDataSave = g_pVideoData;
+	u8 *videoDataSave = g_video_buffer_read_ptr;
 
 	u8 *dlStart = Memory::GetPointer(addr);
 
-	g_pVideoData = dlStart;
+	g_video_buffer_read_ptr = dlStart;
 
 	while (OpcodeDecoder::CommandRunnable(count))
 	{
 		OpcodeDecoder::Run(count);
 
 		// if data was read by the opcode decoder then the video data pointer changed
-		u32 readCount = (u32)(g_pVideoData - dlStart);
-		dlStart = g_pVideoData;
+		u32 readCount = (u32)(g_video_buffer_read_ptr - dlStart);
+		dlStart = g_video_buffer_read_ptr;
 
 		_assert_msg_(VIDEO, count >= readCount, "Display list underrun");
 
 		count -= readCount;
 	}
 
-	g_pVideoData = videoDataSave;
+	g_video_buffer_read_ptr = videoDataSave;
 }
 
 static void DecodeStandard(u32 bufferSize)

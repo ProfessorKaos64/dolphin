@@ -6,11 +6,12 @@
 #include <cinttypes>
 #include <vector>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/StringUtil.h"
 
 #include "Core/PowerPC/JitInterface.h"
+#include "Core/PowerPC/PowerPC.h"
 #include "Core/PowerPC/PPCTables.h"
 #include "Core/PowerPC/Interpreter/Interpreter.h"
 #include "Core/PowerPC/Interpreter/Interpreter_Tables.h"
@@ -24,6 +25,14 @@ GekkoOPInfo *m_infoTable63[1024];
 
 GekkoOPInfo *m_allInstructions[512];
 int m_numInstructions;
+
+const u64 m_crTable[16] =
+{
+	PPCCRToInternal(0x0), PPCCRToInternal(0x1), PPCCRToInternal(0x2), PPCCRToInternal(0x3),
+	PPCCRToInternal(0x4), PPCCRToInternal(0x5), PPCCRToInternal(0x6), PPCCRToInternal(0x7),
+	PPCCRToInternal(0x8), PPCCRToInternal(0x9), PPCCRToInternal(0xA), PPCCRToInternal(0xB),
+	PPCCRToInternal(0xC), PPCCRToInternal(0xD), PPCCRToInternal(0xE), PPCCRToInternal(0xF),
+};
 
 GekkoOPInfo *GetOpInfo(UGeckoInstruction _inst)
 {
@@ -85,68 +94,20 @@ Interpreter::_interpreterInstruction GetInterpreterOp(UGeckoInstruction _inst)
 namespace PPCTables
 {
 
-bool UsesFPU(UGeckoInstruction _inst)
+bool UsesFPU(UGeckoInstruction inst)
 {
-	switch (_inst.OPCD)
-	{
-	case 04: // PS
-		return _inst.SUBOP10 != 1014;
+	GekkoOPInfo* const info = GetOpInfo(inst);
 
-	case 48: // lfs
-	case 49: // lfsu
-	case 50: // lfd
-	case 51: // lfdu
-	case 52: // stfs
-	case 53: // stfsu
-	case 54: // stfd
-	case 55: // stfdu
-	case 56: // psq_l
-	case 57: // psq_lu
-
-	case 59: // FPU-sgl
-	case 60: // psq_st
-	case 61: // psq_stu
-	case 63: // FPU-dbl
-		return true;
-
-	case 31:
-		switch (_inst.SUBOP10)
-		{
-		case 535:
-		case 567:
-		case 599:
-		case 631:
-		case 663:
-		case 695:
-		case 727:
-		case 759:
-		case 983:
-			return true;
-		default:
-			return false;
-		}
-	default:
-		return false;
-	}
+	return (info->flags & FL_USE_FPU) != 0;
 }
 
 void InitTables(int cpu_core)
 {
 	// Interpreter ALWAYS needs to be initialized
 	InterpreterTables::InitTables();
-	switch (cpu_core)
-	{
-	case 0:
-		{
-			// Interpreter
-			break;
-		}
-	default:
-		{
-			JitInterface::InitTables(cpu_core);
-			break;
-		}
-	}
+
+	if (cpu_core != PowerPC::CORE_INTERPRETER)
+		JitInterface::InitTables(cpu_core);
 }
 
 #define OPLOG

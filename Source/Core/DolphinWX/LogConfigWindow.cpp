@@ -3,20 +3,13 @@
 // Refer to the license.txt file included.
 
 #include <vector>
-#include <wx/anybutton.h>
-#include <wx/arrstr.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/checklst.h>
-#include <wx/defs.h>
-#include <wx/event.h>
-#include <wx/gdicmn.h>
 #include <wx/panel.h>
 #include <wx/radiobox.h>
 #include <wx/sizer.h>
-#include <wx/translation.h>
 #include <wx/validate.h>
-#include <wx/windowid.h>
 
 #include "Common/FileUtil.h"
 #include "Common/IniFile.h"
@@ -26,8 +19,6 @@
 #include "DolphinWX/LogConfigWindow.h"
 #include "DolphinWX/LogWindow.h"
 #include "DolphinWX/WxUtils.h"
-
-class wxWindow;
 
 LogConfigWindow::LogConfigWindow(wxWindow* parent, CLogWindow *log_window, wxWindowID id)
 	: wxPanel(parent, id, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL, _("Log Configuration"))
@@ -66,14 +57,6 @@ void LogConfigWindow::CreateGUIControls()
 	m_writeConsoleCB->Bind(wxEVT_CHECKBOX, &LogConfigWindow::OnWriteConsoleChecked, this);
 	m_writeWindowCB = new wxCheckBox(this, wxID_ANY, _("Write to Window"));
 	m_writeWindowCB->Bind(wxEVT_CHECKBOX, &LogConfigWindow::OnWriteWindowChecked, this);
-	m_writeDebuggerCB = nullptr;
-#ifdef _MSC_VER
-	if (IsDebuggerPresent())
-	{
-		m_writeDebuggerCB = new wxCheckBox(this, wxID_ANY, _("Write to Debugger"));
-		m_writeDebuggerCB->Bind(wxEVT_CHECKBOX, &LogConfigWindow::OnWriteDebuggerChecked, this);
-	}
-#endif
 
 	wxButton *btn_toggle_all = new wxButton(this, wxID_ANY, _("Toggle All Log Types"),
 			wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
@@ -87,17 +70,7 @@ void LogConfigWindow::CreateGUIControls()
 	wxStaticBoxSizer* sbOutputs = new wxStaticBoxSizer(wxVERTICAL, this, _("Logger Outputs"));
 	sbOutputs->Add(m_writeFileCB, 0, wxDOWN, 1);
 	sbOutputs->Add(m_writeConsoleCB, 0, wxDOWN, 1);
-#ifdef _MSC_VER
-	if (m_writeDebuggerCB)
-	{
-		sbOutputs->Add(m_writeWindowCB, 0, wxDOWN, 1);
-		sbOutputs->Add(m_writeDebuggerCB, 0);
-	}
-	else
-#endif
-	{
-		sbOutputs->Add(m_writeWindowCB, 0);
-	}
+	sbOutputs->Add(m_writeWindowCB, 0);
 
 	wxStaticBoxSizer* sbLogTypes = new wxStaticBoxSizer(wxVERTICAL, this, _("Log Types"));
 	sbLogTypes->Add(m_checks, 1, wxEXPAND);
@@ -139,24 +112,13 @@ void LogConfigWindow::LoadSettings()
 	m_writeConsoleCB->SetValue(m_writeConsole);
 	options->Get("WriteToWindow", &m_writeWindow, true);
 	m_writeWindowCB->SetValue(m_writeWindow);
-#ifdef _MSC_VER
-	if (IsDebuggerPresent())
-	{
-		options->Get("WriteToDebugger", &m_writeDebugger, true);
-		m_writeDebuggerCB->SetValue(m_writeDebugger);
-	}
-	else
-#endif
-	{
-		m_writeDebugger = false;
-	}
 
 	// Run through all of the log types and check each checkbox for each logging type
 	// depending on its set value within the config ini.
 	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; ++i)
 	{
 		bool log_enabled;
-		ini.GetOrCreateSection("Logs")->Get(m_LogManager->GetShortName((LogTypes::LOG_TYPE)i), &log_enabled, true);
+		ini.GetOrCreateSection("Logs")->Get(m_LogManager->GetShortName((LogTypes::LOG_TYPE)i), &log_enabled, false);
 
 		if (log_enabled)
 			enableAll = false;
@@ -175,10 +137,6 @@ void LogConfigWindow::SaveSettings()
 	options->Set("WriteToFile", m_writeFile);
 	options->Set("WriteToConsole", m_writeConsole);
 	options->Set("WriteToWindow", m_writeWindow);
-#ifdef _MSC_VER
-	if (IsDebuggerPresent())
-		options->Set("WriteToDebugger", m_writeDebugger);
-#endif
 
 	// Save all enabled/disabled states of the log types to the config ini.
 	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; ++i)
@@ -249,21 +207,6 @@ void LogConfigWindow::OnWriteWindowChecked(wxCommandEvent& event)
 	}
 }
 
-void LogConfigWindow::OnWriteDebuggerChecked(wxCommandEvent& event)
-{
-	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; ++i)
-	{
-		m_writeDebugger = event.IsChecked();
-		if (m_checks->IsChecked(i))
-		{
-			if (m_writeDebugger)
-				m_LogManager->AddListener((LogTypes::LOG_TYPE)i, (LogListener *)m_LogManager->GetDebuggerListener());
-			else
-				m_LogManager->RemoveListener((LogTypes::LOG_TYPE)i, (LogListener *)m_LogManager->GetDebuggerListener());
-		}
-	}
-}
-
 void LogConfigWindow::OnToggleAll(wxCommandEvent& WXUNUSED(event))
 {
 	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; ++i)
@@ -288,15 +231,12 @@ void LogConfigWindow::ToggleLog(int _logType, bool enable)
 			m_LogManager->AddListener(logType, m_LogManager->GetFileListener());
 		if (m_writeConsole)
 			m_LogManager->AddListener(logType, m_LogManager->GetConsoleListener());
-		if (m_writeDebugger)
-			m_LogManager->AddListener(logType, m_LogManager->GetDebuggerListener());
 	}
 	else
 	{
 		m_LogManager->RemoveListener(logType, (LogListener *)m_LogWindow);
 		m_LogManager->RemoveListener(logType, m_LogManager->GetFileListener());
 		m_LogManager->RemoveListener(logType, m_LogManager->GetConsoleListener());
-		m_LogManager->RemoveListener(logType, m_LogManager->GetDebuggerListener());
 	}
 }
 
@@ -305,3 +245,4 @@ void LogConfigWindow::OnLogCheck(wxCommandEvent& event)
 	int i = event.GetInt();
 	ToggleLog(i, m_checks->IsChecked(i));
 }
+

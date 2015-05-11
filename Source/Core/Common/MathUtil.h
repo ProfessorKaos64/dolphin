@@ -7,7 +7,7 @@
 #include <cstdlib>
 #include <vector>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 namespace MathUtil
 {
@@ -123,6 +123,15 @@ u32 ClassifyDouble(double dvalue);
 // More efficient float version.
 u32 ClassifyFloat(float fvalue);
 
+extern const int frsqrte_expected_base[];
+extern const int frsqrte_expected_dec[];
+extern const int fres_expected_base[];
+extern const int fres_expected_dec[];
+
+// PowerPC approximation algorithms
+double ApproximateReciprocalSquareRoot(double val);
+double ApproximateReciprocal(double val);
+
 template<class T>
 struct Rectangle
 {
@@ -147,40 +156,39 @@ struct Rectangle
 	// this Clamp.
 	void ClampLL(T x1, T y1, T x2, T y2)
 	{
-		if (left < x1) left = x1;
-		if (right > x2) right = x2;
-		if (top > y1) top = y1;
-		if (bottom < y2) bottom = y2;
+		Clamp(&left, x1, x2);
+		Clamp(&right, x1, x2);
+		Clamp(&top, y2, y1);
+		Clamp(&bottom, y2, y1);
 	}
 
 	// If the rectangle is in a coordinate system with an upper-left origin,
 	// use this Clamp.
 	void ClampUL(T x1, T y1, T x2, T y2)
 	{
-		if (left < x1) left = x1;
-		if (right > x2) right = x2;
-		if (top < y1) top = y1;
-		if (bottom > y2) bottom = y2;
+		Clamp(&left, x1, x2);
+		Clamp(&right, x1, x2);
+		Clamp(&top, y1, y2);
+		Clamp(&bottom, y1, y2);
 	}
 };
 
 }  // namespace MathUtil
-
-inline float pow2f(float x) {return x * x;}
-inline double pow2(double x) {return x * x;}
 
 float MathFloatVectorSum(const std::vector<float>&);
 
 #define ROUND_UP(x, a)   (((x) + (a) - 1) & ~((a) - 1))
 #define ROUND_DOWN(x, a) ((x) & ~((a) - 1))
 
+inline bool IsPow2(u32 imm) {return (imm & (imm - 1)) == 0;}
+
 // Rounds down. 0 -> undefined
-inline int Log2(u64 val)
+inline int IntLog2(u64 val)
 {
 #if defined(__GNUC__)
 	return 63 - __builtin_clzll(val);
 
-#elif defined(_MSC_VER) && _ARCH_64
+#elif defined(_MSC_VER)
 	unsigned long result = -1;
 	_BitScanReverse64(&result, val);
 	return result;
@@ -224,6 +232,7 @@ public:
 	static void Set(Matrix44 &mtx, const float mtxArray[16]);
 
 	static void Translate(Matrix44 &mtx, const float vec[3]);
+	static void Shear(Matrix44 &mtx, const float a, const float b = 0);
 
 	static void Multiply(const Matrix44 &a, const Matrix44 &b, Matrix44 &result);
 

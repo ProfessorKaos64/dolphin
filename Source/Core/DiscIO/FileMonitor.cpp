@@ -9,7 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 #include "Common/Logging/LogManager.h"
 
@@ -27,7 +27,7 @@ namespace FileMon
 
 static DiscIO::IVolume *OpenISO = nullptr;
 static DiscIO::IFileSystem *pFileSystem = nullptr;
-static std::vector<const DiscIO::SFileInfo *> GCFiles;
+static std::vector<const DiscIO::SFileInfo *> DiscFiles;
 static std::string ISOFile = "", CurrentFile = "";
 static bool FileAccess = true;
 
@@ -38,7 +38,7 @@ bool IsSoundFile(const std::string& filename)
 	SplitPath(filename, nullptr, nullptr, &extension);
 	std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
 
-	std::unordered_set<std::string> extensions = {
+	static std::unordered_set<std::string> extensions = {
 		".adp",   // 1080 Avalanche, Crash Bandicoot, etc.
 		".adx",   // Sonic Adventure 2 Battle, etc.
 		".afc",   // Zelda WW
@@ -58,8 +58,8 @@ bool IsSoundFile(const std::string& filename)
 }
 
 
-// Read the GC file system
-void ReadGC(const std::string& filename)
+// Read the file system
+void ReadFileSystem(const std::string& filename)
 {
 	// Should have an actual Shutdown procedure or something
 	if (OpenISO != nullptr)
@@ -73,29 +73,30 @@ void ReadGC(const std::string& filename)
 		pFileSystem = nullptr;
 	}
 
-	// GCFiles' pointers are no longer valid after pFileSystem is cleared
-	GCFiles.clear();
+	// DiscFiles' pointers are no longer valid after pFileSystem is cleared
+	DiscFiles.clear();
 	OpenISO = DiscIO::CreateVolumeFromFilename(filename);
 	if (!OpenISO)
 		return;
 
-	if (!DiscIO::IsVolumeWiiDisc(OpenISO) && !DiscIO::IsVolumeWadFile(OpenISO))
+	if (!OpenISO->IsWadFile())
 	{
 		pFileSystem = DiscIO::CreateFileSystem(OpenISO);
 
 		if (!pFileSystem)
 			return;
 
-		pFileSystem->GetFileList(GCFiles);
+		pFileSystem->GetFileList(DiscFiles);
 	}
+
 	FileAccess = true;
 }
 
-// Check if we should play this file
+// Logs a file if it passes a few checks
 void CheckFile(const std::string& file, u64 size)
 {
 	// Don't do anything if the log is unselected
-	if (!LogManager::GetInstance()->IsEnabled(LogTypes::FILEMON))
+	if (!LogManager::GetInstance()->IsEnabled(LogTypes::FILEMON, LogTypes::LWARNING))
 		return;
 	// Do nothing if we found the same file again
 	if (CurrentFile == file)
@@ -119,7 +120,7 @@ void CheckFile(const std::string& file, u64 size)
 }
 
 
-// Find the GC filename
+// Find the filename
 void FindFilename(u64 offset)
 {
 	// Don't do anything if a game is not running
@@ -127,7 +128,7 @@ void FindFilename(u64 offset)
 		return;
 
 	// Or if the log is unselected
-	if (!LogManager::GetInstance()->IsEnabled(LogTypes::FILEMON))
+	if (!LogManager::GetInstance()->IsEnabled(LogTypes::FILEMON, LogTypes::LWARNING))
 		return;
 
 	// Or if we don't have file access
@@ -137,7 +138,7 @@ void FindFilename(u64 offset)
 	if (!pFileSystem || ISOFile != SConfig::GetInstance().m_LastFilename)
 	{
 		FileAccess = false;
-		ReadGC(SConfig::GetInstance().m_LastFilename);
+		ReadFileSystem(SConfig::GetInstance().m_LastFilename);
 		ISOFile = SConfig::GetInstance().m_LastFilename;
 		INFO_LOG(FILEMON, "Opening '%s'", ISOFile.c_str());
 		return;
@@ -165,8 +166,8 @@ void Close()
 		pFileSystem = nullptr;
 	}
 
-	// GCFiles' pointers are no longer valid after pFileSystem is cleared
-	GCFiles.clear();
+	// DiscFiles' pointers are no longer valid after pFileSystem is cleared
+	DiscFiles.clear();
 
 	ISOFile = "";
 	CurrentFile = "";

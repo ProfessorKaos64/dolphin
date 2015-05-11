@@ -11,8 +11,12 @@
 #define SLEEP(x) usleep(x*1000)
 #endif
 
-#include <clocale>
+#ifdef __APPLE__
+#include <libkern/OSByteOrder.h>
+#endif
+
 #include <cstddef>
+#include <string>
 #include <type_traits>
 #include "Common/CommonTypes.h"
 
@@ -30,24 +34,6 @@ struct ArraySizeImpl : public std::extent<T>
 #define b16(x)  ( b8(x) | ( b8(x) >> 8) )
 #define b32(x)  (b16(x) | (b16(x) >>16) )
 #define ROUND_UP_POW2(x)  (b32(x - 1) + 1)
-
-#ifndef __GNUC_PREREQ
-	#define __GNUC_PREREQ(a, b) 0
-#endif
-
-#if (defined __GNUC__ && !__GNUC_PREREQ(4,9)) && \
-    !defined __SSSE3__ && defined _M_X86
-#include <emmintrin.h>
-static __inline __m128i __attribute__((__always_inline__))
-_mm_shuffle_epi8(__m128i a, __m128i mask)
-{
-	__m128i result;
-	__asm__("pshufb %1, %0"
-		: "=x" (result)
-		: "xm" (mask), "0" (a));
-	return result;
-}
-#endif
 
 #ifndef _WIN32
 
@@ -70,25 +56,29 @@ _mm_shuffle_epi8(__m128i a, __m128i mask)
 // GCC 4.8 defines all the rotate functions now
 // Small issue with GCC's lrotl/lrotr intrinsics is they are still 32bit while we require 64bit
 #ifndef _rotl
-inline u32 _rotl(u32 x, int shift) {
+inline u32 _rotl(u32 x, int shift)
+{
 	shift &= 31;
 	if (!shift) return x;
 	return (x << shift) | (x >> (32 - shift));
 }
 
-inline u32 _rotr(u32 x, int shift) {
+inline u32 _rotr(u32 x, int shift)
+{
 	shift &= 31;
 	if (!shift) return x;
 	return (x >> shift) | (x << (32 - shift));
 }
 #endif
 
-inline u64 _rotl64(u64 x, unsigned int shift){
+inline u64 _rotl64(u64 x, unsigned int shift)
+{
 	unsigned int n = shift % 64;
 	return (x << n) | (x >> (64 - n));
 }
 
-inline u64 _rotr64(u64 x, unsigned int shift){
+inline u64 _rotr64(u64 x, unsigned int shift)
+{
 	unsigned int n = shift % 64;
 	return (x >> n) | (x << (64 - n));
 }
@@ -101,46 +91,7 @@ inline u64 _rotr64(u64 x, unsigned int shift){
 	#define snprintf _snprintf
 	#define vscprintf _vscprintf
 
-// Locale Cross-Compatibility
-	#define locale_t _locale_t
-	#define freelocale _free_locale
-	#define newlocale(mask, locale, base) _create_locale(mask, locale)
-
-	#define LC_GLOBAL_LOCALE    ((locale_t)-1)
-	#define LC_ALL_MASK         LC_ALL
-	#define LC_COLLATE_MASK     LC_COLLATE
-	#define LC_CTYPE_MASK       LC_CTYPE
-	#define LC_MONETARY_MASK    LC_MONETARY
-	#define LC_NUMERIC_MASK     LC_NUMERIC
-	#define LC_TIME_MASK        LC_TIME
-
-	inline locale_t uselocale(locale_t new_locale)
-	{
-		// Retrieve the current per thread locale setting
-		bool bIsPerThread = (_configthreadlocale(0) == _ENABLE_PER_THREAD_LOCALE);
-
-		// Retrieve the current thread-specific locale
-		locale_t old_locale = bIsPerThread ? _get_current_locale() : LC_GLOBAL_LOCALE;
-
-		if (new_locale == LC_GLOBAL_LOCALE)
-		{
-			// Restore the global locale
-			_configthreadlocale(_DISABLE_PER_THREAD_LOCALE);
-		}
-		else if (new_locale != nullptr)
-		{
-			// Configure the thread to set the locale only for this thread
-			_configthreadlocale(_ENABLE_PER_THREAD_LOCALE);
-
-			// Set all locale categories
-			for (int i = LC_MIN; i <= LC_MAX; i++)
-				setlocale(i, new_locale->locinfo->lc_category[i].locale);
-		}
-
-		return old_locale;
-	}
-
-// 64 bit offsets for windows
+// 64 bit offsets for Windows
 	#define fseeko _fseeki64
 	#define ftello _ftelli64
 	#define atoll _atoi64
@@ -148,21 +99,24 @@ inline u64 _rotr64(u64 x, unsigned int shift){
 	#define fstat64 _fstat64
 	#define fileno _fileno
 
-	#if _M_X86_32
-		#define Crash() {__asm int 3}
-	#else
-extern "C" {
+extern "C"
+{
 	__declspec(dllimport) void __stdcall DebugBreak(void);
 }
-		#define Crash() {DebugBreak();}
-	#endif // M_IX86
+	#define Crash() {DebugBreak();}
+
+	#if (_MSC_VER > 1800)
+	#error alignof compat can be removed
+	#else
+	#define alignof(x) __alignof(x)
+	#endif
 #endif // WIN32 ndef
 
 // Generic function to get last error message.
 // Call directly after the command or use the error num.
 // This function might change the error code.
 // Defined in Misc.cpp.
-const char* GetLastErrorMsg();
+std::string GetLastErrorMsg();
 
 namespace Common
 {
@@ -183,17 +137,19 @@ inline u64 swap64(u64 _data) {return _byteswap_uint64(_data);}
 inline u16 swap16 (u16 _data) { u32 data = _data; __asm__ ("rev16 %0, %1\n" : "=l" (data) : "l" (data)); return (u16)data;}
 inline u32 swap32 (u32 _data) {__asm__ ("rev %0, %1\n" : "=l" (_data) : "l" (_data)); return _data;}
 inline u64 swap64(u64 _data) {return ((u64)swap32(_data) << 32) | swap32(_data >> 32);}
-#elif __linux__
+#elif __linux__ && !(ANDROID && _M_ARM_64)
+// Android NDK r10c has broken builtin byte swap routines
+// Disabled for now.
 inline u16 swap16(u16 _data) {return bswap_16(_data);}
 inline u32 swap32(u32 _data) {return bswap_32(_data);}
 inline u64 swap64(u64 _data) {return bswap_64(_data);}
 #elif __APPLE__
 inline __attribute__((always_inline)) u16 swap16(u16 _data)
-	{return (_data >> 8) | (_data << 8);}
+	{return OSSwapInt16(_data);}
 inline __attribute__((always_inline)) u32 swap32(u32 _data)
-	{return __builtin_bswap32(_data);}
+	{return OSSwapInt32(_data);}
 inline __attribute__((always_inline)) u64 swap64(u64 _data)
-	{return __builtin_bswap64(_data);}
+	{return OSSwapInt64(_data);}
 #elif __FreeBSD__
 inline u16 swap16(u16 _data) {return bswap16(_data);}
 inline u32 swap32(u32 _data) {return bswap32(_data);}

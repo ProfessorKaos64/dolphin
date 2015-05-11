@@ -20,6 +20,8 @@ struct InstructionInfo
 	bool byteSwap;
 	u64 immediate;
 	s32 displacement;
+
+	bool operator==(const InstructionInfo &other) const;
 };
 
 struct ModRM
@@ -28,7 +30,7 @@ struct ModRM
 	ModRM(u8 modRM, u8 rex)
 	{
 		mod = modRM >> 6;
-		reg = ((modRM >> 3) & 7) | ((rex & 4)?8:0);
+		reg = ((modRM >> 3) & 7) | ((rex & 4) ? 8 : 0);
 		rm = modRM & 7;
 	}
 };

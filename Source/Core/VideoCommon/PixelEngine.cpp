@@ -3,18 +3,20 @@
 // Refer to the license.txt file included.
 
 
-// http://developer.nvidia.com/object/General_FAQ.html#t6 !!!!!
+// http://www.nvidia.com/object/General_FAQ.html#t6 !!!!!
 
 
 #include "Common/Atomic.h"
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Core/ConfigManager.h"
 #include "Core/CoreTiming.h"
 #include "Core/State.h"
 #include "Core/HW/MMIO.h"
 #include "Core/HW/ProcessorInterface.h"
+#include "VideoCommon/BoundingBox.h"
 #include "VideoCommon/CommandProcessor.h"
+#include "VideoCommon/Fifo.h"
 #include "VideoCommon/PixelEngine.h"
 #include "VideoCommon/RenderBase.h"
 #include "VideoCommon/VideoCommon.h"
@@ -106,9 +108,6 @@ static int et_SetFinishOnMainThread;
 static volatile u32 interruptSetToken = 0;
 static volatile u32 interruptSetFinish = 0;
 
-u16 bbox[4];
-bool bbox_active;
-
 enum
 {
 	INT_CAUSE_PE_TOKEN  = 0x200, // GP Token
@@ -128,9 +127,6 @@ void DoState(PointerWrap &p)
 	p.Do(g_bSignalFinishInterrupt);
 	p.Do(interruptSetToken);
 	p.Do(interruptSetFinish);
-
-	p.Do(bbox);
-	p.Do(bbox_active);
 }
 
 void UpdateInterrupts();
@@ -155,13 +151,6 @@ void Init()
 
 	et_SetTokenOnMainThread = CoreTiming::RegisterEvent("SetToken", SetToken_OnMainThread);
 	et_SetFinishOnMainThread = CoreTiming::RegisterEvent("SetFinish", SetFinish_OnMainThread);
-
-	bbox[0] = 0x80;
-	bbox[1] = 0xA0;
-	bbox[2] = 0x80;
-	bbox[3] = 0xA0;
-
-	bbox_active = false;
 }
 
 void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
@@ -244,8 +233,8 @@ void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
 	{
 		mmio->Register(base | (PE_BBOX_LEFT + 2 * i),
 			MMIO::ComplexRead<u16>([i](u32) {
-				bbox_active = false;
-				return bbox[i];
+				BoundingBox::active = false;
+				return g_video_backend->Video_GetBoundingBox(i);
 			}),
 			MMIO::InvalidWrite<u16>()
 		);
@@ -298,7 +287,6 @@ void SetFinish_OnMainThread(u64 userdata, int cyclesLate)
 	Common::AtomicStore(*(volatile u32*)&g_bSignalFinishInterrupt, 1);
 	UpdateInterrupts();
 	CommandProcessor::interruptFinishWaiting = false;
-	CommandProcessor::isPossibleWaitingSetDrawDone = false;
 }
 
 // SetToken
@@ -311,7 +299,10 @@ void SetToken(const u16 _token, const int _bSetTokenAcknowledge)
 	}
 
 	CommandProcessor::interruptTokenWaiting = true;
-	CoreTiming::ScheduleEvent_Threadsafe(0, et_SetTokenOnMainThread, _token | (_bSetTokenAcknowledge << 16));
+	if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bCPUThread || g_use_deterministic_gpu_thread)
+		CoreTiming::ScheduleEvent(0, et_SetTokenOnMainThread, _token | (_bSetTokenAcknowledge << 16));
+	else
+		CoreTiming::ScheduleEvent_Threadsafe(0, et_SetTokenOnMainThread, _token | (_bSetTokenAcknowledge << 16));
 }
 
 // SetFinish
@@ -319,7 +310,10 @@ void SetToken(const u16 _token, const int _bSetTokenAcknowledge)
 void SetFinish()
 {
 	CommandProcessor::interruptFinishWaiting = true;
-	CoreTiming::ScheduleEvent_Threadsafe(0, et_SetFinishOnMainThread, 0);
+	if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bCPUThread || g_use_deterministic_gpu_thread)
+		CoreTiming::ScheduleEvent(0, et_SetFinishOnMainThread, 0);
+	else
+		CoreTiming::ScheduleEvent_Threadsafe(0, et_SetFinishOnMainThread, 0);
 	INFO_LOG(PIXELENGINE, "VIDEO Set Finish");
 }
 

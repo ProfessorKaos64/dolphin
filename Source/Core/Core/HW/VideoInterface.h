@@ -21,7 +21,7 @@ namespace VideoInterface
 #define NTSC_LINE_COUNT    525
 // These line numbers indicate the beginning of the "active video" in a frame.
 // An NTSC frame has the lower field first followed by the upper field.
-// TODO: Is this true for PAL-M? Is this true for EURGB60?
+// TODO: Is this true for PAL-M? Is this true for PAL60?
 #define NTSC_LOWER_BEGIN    21
 #define NTSC_UPPER_BEGIN    283
 
@@ -290,7 +290,7 @@ struct SVIFilterCoefTables
 	UVIFilterCoefTable4 Tables36[4];
 };
 
-// Debug video mode only, probably never used in dolphin...
+// Debug video mode only, probably never used in Dolphin...
 union UVIBorderBlankRegister
 {
 	u32 Hex;
@@ -353,6 +353,4 @@ union UVIHorizontalStepping
 
 	unsigned int GetTicksPerLine();
 	unsigned int GetTicksPerFrame();
-
-	int GetNumFields();
-};
+}

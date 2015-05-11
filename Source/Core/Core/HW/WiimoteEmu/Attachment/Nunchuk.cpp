@@ -2,25 +2,13 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
+#include "Core/HW/WiimoteEmu/WiimoteEmu.h"
 #include "Core/HW/WiimoteEmu/Attachment/Nunchuk.h"
 
 namespace WiimoteEmu
 {
 
-static const u8 nunchuck_id[] = { 0x00, 0x00, 0xa4, 0x20, 0x00, 0x00 };
-/* Default calibration for the nunchuck. It should be written to 0x20 - 0x3f of the
-   extension register. 0x80 is the neutral x and y accelerators and 0xb3 is the
-   neutral z accelerometer that is adjusted for gravity. */
-static const u8 nunchuck_calibration[] =
-{
-	0x80, 0x80, 0x80, 0x00, // accelerometer x, y, z neutral
-	0xb3, 0xb3, 0xb3, 0x00, //  x, y, z g-force values
-
-	// 0x80 = analog stick x and y axis center
-	0xff, 0x00, 0x80,
-	0xff, 0x00, 0x80,
-	0xec, 0x41 // checksum on the last two bytes
-};
+static const u8 nunchuk_id[] = { 0x00, 0x00, 0xa4, 0x20, 0x00, 0x00 };
 
 static const u8 nunchuk_button_bitmasks[] =
 {
@@ -36,7 +24,7 @@ Nunchuk::Nunchuk(WiimoteEmu::ExtensionReg& _reg) : Attachment(_trans("Nunchuk"),
 	m_buttons->controls.emplace_back(new ControlGroup::Input("Z"));
 
 	// stick
-	groups.emplace_back(m_stick = new AnalogStick("Stick"));
+	groups.emplace_back(m_stick = new AnalogStick("Stick", DEFAULT_ATTACHMENT_STICK_RADIUS));
 
 	// swing
 	groups.emplace_back(m_swing = new Force("Swing"));
@@ -50,11 +38,8 @@ Nunchuk::Nunchuk(WiimoteEmu::ExtensionReg& _reg) : Attachment(_trans("Nunchuk"),
 	m_shake->controls.emplace_back(new ControlGroup::Input("Y"));
 	m_shake->controls.emplace_back(new ControlGroup::Input("Z"));
 
-	// set up register
-	// calibration
-	memcpy(&calibration, nunchuck_calibration, sizeof(nunchuck_calibration));
 	// id
-	memcpy(&id, nunchuck_id, sizeof(nunchuck_id));
+	memcpy(&id, nunchuk_id, sizeof(nunchuk_id));
 
 	// this should get set to 0 on disconnect, but it isn't, o well
 	memset(m_shake_step, 0, sizeof(m_shake_step));
@@ -62,38 +47,30 @@ Nunchuk::Nunchuk(WiimoteEmu::ExtensionReg& _reg) : Attachment(_trans("Nunchuk"),
 
 void Nunchuk::GetState(u8* const data)
 {
-	wm_extension* const ncdata = (wm_extension*)data;
-	ncdata->bt = 0;
+	wm_nc* const ncdata = (wm_nc*)data;
+	ncdata->bt.hex = 0;
 
 	// stick
-	double state[2];
-	m_stick->GetState(&state[0], &state[1]);
+	double jx, jy;
+	m_stick->GetState(&jx, &jy);
 
-	nu_cal &cal = *(nu_cal*)&reg.calibration;
-	nu_js cal_js[2];
-	cal_js[0] = cal.jx;
-	cal_js[1] = cal.jy;
+	ncdata->jx = u8(STICK_CENTER + jx * STICK_RADIUS);
+	ncdata->jy = u8(STICK_CENTER + jy * STICK_RADIUS);
 
-	for (int i = 0; i < 2; i++) {
-		double &s = state[i];
-		nu_js c = cal_js[i];
-		if (s < 0)
-			s = s * abs(c.min - c.center) + c.center;
-		else if (s > 0)
-			s = s * abs(c.max - c.center) + c.center;
-		else
-			s = c.center;
-	}
-
-	ncdata->jx = u8(trim(state[0]));
-	ncdata->jy = u8(trim(state[1]));
-
-	if (ncdata->jx != cal.jx.center || ncdata->jy != cal.jy.center)
+	// Some terribly coded games check whether to move with a check like
+	//
+	//     if (x != 0 && y != 0)
+	//         do_movement(x, y);
+	//
+	// With keyboard controls, these games break if you simply hit
+	// of the axes. Adjust this if you're hitting one of the axes so that
+	// we slightly tweak the other axis.
+	if (ncdata->jx != STICK_CENTER || ncdata->jy != STICK_CENTER)
 	{
-		if (ncdata->jy == cal.jy.center)
-			ncdata->jy = cal.jy.center + 1;
-		if (ncdata->jx == cal.jx.center)
-			ncdata->jx = cal.jx.center + 1;
+		if (ncdata->jx == STICK_CENTER)
+			++ncdata->jx;
+		if (ncdata->jy == STICK_CENTER)
+			++ncdata->jy;
 	}
 
 	AccelData accel;
@@ -106,12 +83,35 @@ void Nunchuk::GetState(u8* const data)
 	// shake
 	EmulateShake(&accel, m_shake, m_shake_step);
 	// buttons
-	m_buttons->GetState(&ncdata->bt, nunchuk_button_bitmasks);
+	m_buttons->GetState(&ncdata->bt.hex, nunchuk_button_bitmasks);
 
 	// flip the button bits :/
-	ncdata->bt ^= 0x03;
+	ncdata->bt.hex ^= 0x03;
 
-	FillRawAccelFromGForceData(*(wm_accel*)&ncdata->ax, *(accel_cal*)&reg.calibration, accel);
+	// We now use 2 bits more precision, so multiply by 4 before converting to int
+	s16 accel_x = (s16)(4 * (accel.x * ACCEL_RANGE + ACCEL_ZERO_G));
+	s16 accel_y = (s16)(4 * (accel.y * ACCEL_RANGE + ACCEL_ZERO_G));
+	s16 accel_z = (s16)(4 * (accel.z * ACCEL_RANGE + ACCEL_ZERO_G));
+
+	if (accel_x > 1024)
+		accel_x = 1024;
+	else if (accel_x < 0)
+		accel_x = 0;
+	if (accel_y > 1024)
+		accel_y = 1024;
+	else if (accel_y < 0)
+		accel_y = 0;
+	if (accel_z > 1024)
+		accel_z = 1024;
+	else if (accel_z < 0)
+		accel_z = 0;
+
+	ncdata->ax = (accel_x >> 2) & 0xFF;
+	ncdata->ay = (accel_y >> 2) & 0xFF;
+	ncdata->az = (accel_z >> 2) & 0xFF;
+	ncdata->bt.acc_x_lsb = accel_x & 0x3;
+	ncdata->bt.acc_y_lsb = accel_y & 0x3;
+	ncdata->bt.acc_z_lsb = accel_z & 0x3;
 }
 
 void Nunchuk::LoadDefaults(const ControllerInterface& ciface)

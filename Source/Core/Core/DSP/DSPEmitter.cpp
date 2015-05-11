@@ -246,11 +246,11 @@ void DSPEmitter::Compile(u16 start_addr)
 		if (DSPAnalyzer::code_flags[compilePC-1] & DSPAnalyzer::CODE_LOOP_END)
 		{
 			MOVZX(32, 16, EAX, M(&(g_dsp.r.st[2])));
-			CMP(32, R(EAX), Imm32(0));
+			TEST(32, R(EAX), R(EAX));
 			FixupBranch rLoopAddressExit = J_CC(CC_LE, true);
 
 			MOVZX(32, 16, EAX, M(&g_dsp.r.st[3]));
-			CMP(32, R(EAX), Imm32(0));
+			TEST(32, R(EAX), R(EAX));
 			FixupBranch rLoopCounterExit = J_CC(CC_LE, true);
 
 			if (!opcode->branch)
@@ -384,7 +384,9 @@ const u8 *DSPEmitter::CompileStub()
 void DSPEmitter::CompileDispatcher()
 {
 	enterDispatcher = AlignCode16();
-	ABI_PushAllCalleeSavedRegsAndAdjustStack();
+	// We don't use floating point (high 16 bits).
+	BitSet32 registers_used = ABI_ALL_CALLEE_SAVED & BitSet32(0xffff);
+	ABI_PushRegistersAndAdjustStack(registers_used, 8);
 
 	const u8 *dispatcherLoop = GetCodePtr();
 
@@ -401,15 +403,9 @@ void DSPEmitter::CompileDispatcher()
 
 
 	// Execute block. Cycles executed returned in EAX.
-#if _M_X86_32
-	MOVZX(32, 16, ECX, M(&g_dsp.pc));
-	MOV(32, R(EBX), ImmPtr(blocks));
-	JMPptr(MComplex(EBX, ECX, SCALE_4, 0));
-#else
-	MOVZX(64, 16, ECX, M(&g_dsp.pc));//for clarity, use 64 here.
+	MOVZX(64, 16, ECX, M(&g_dsp.pc));
 	MOV(64, R(RBX), ImmPtr(blocks));
 	JMPptr(MComplex(RBX, RCX, SCALE_8, 0));
-#endif
 
 	returnDispatcher = GetCodePtr();
 
@@ -425,6 +421,6 @@ void DSPEmitter::CompileDispatcher()
 		SetJumpTarget(exceptionExit);
 	}
 	//MOV(32, M(&cyclesLeft), Imm32(0));
-	ABI_PopAllCalleeSavedRegsAndAdjustStack();
+	ABI_PopRegistersAndAdjustStack(registers_used, 8);
 	RET();
 }

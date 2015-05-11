@@ -40,26 +40,40 @@ public:
 
 		bool Get(const std::string& key, std::string* value, const std::string& defaultValue = NULL_STRING);
 
-		void Set(const std::string& key, u32 newValue) {
+		void Set(const std::string& key, u32 newValue)
+		{
 			Set(key, StringFromFormat("0x%08x", newValue));
 		}
-		void Set(const std::string& key, float newValue) {
-			Set(key, StringFromFormat("%f", newValue));
-		}
-		void Set(const std::string& key, const float newValue, const float defaultValue);
-		void Set(const std::string& key, double newValue) {
+
+		void Set(const std::string& key, float newValue)
+		{
 			Set(key, StringFromFormat("%f", newValue));
 		}
 
-		void Set(const std::string& key, int newValue, int defaultValue);
-		void Set(const std::string& key, int newValue) {
+		void Set(const std::string& key, double newValue)
+		{
+			Set(key, StringFromFormat("%f", newValue));
+		}
+
+		void Set(const std::string& key, int newValue)
+		{
 			Set(key, StringFromInt(newValue));
 		}
 
-		void Set(const std::string& key, bool newValue, bool defaultValue);
-		void Set(const std::string& key, bool newValue) {
+		void Set(const std::string& key, bool newValue)
+		{
 			Set(key, StringFromBool(newValue));
 		}
+
+		template<typename T>
+		void Set(const std::string& key, T newValue, const T defaultValue)
+		{
+			if (newValue != defaultValue)
+				Set(key, newValue);
+			else
+				Delete(key);
+		}
+
 		void Set(const std::string& key, const std::vector<std::string>& newValues);
 
 		bool Get(const std::string& key, int* value, int defaultValue = 0);
@@ -69,7 +83,8 @@ public:
 		bool Get(const std::string& key, double* value, double defaultValue = false);
 		bool Get(const std::string& key, std::vector<std::string>* values);
 
-		bool operator < (const Section& other) const {
+		bool operator < (const Section& other) const
+		{
 			return name < other.name;
 		}
 
@@ -115,6 +130,11 @@ public:
 	void SortSections();
 
 	Section* GetOrCreateSection(const std::string& section);
+
+	// This function is related to parsing data from lines of INI files
+	// It's used outside of IniFile, which is why it is exposed publicly
+	// In particular it is used in PostProcessing for its configuration
+	static void ParseLine(const std::string& line, std::string* keyOut, std::string* valueOut);
 
 private:
 	std::list<Section> sections;

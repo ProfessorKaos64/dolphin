@@ -4,7 +4,10 @@
 
 #pragma once
 
+#include <functional> // for hash
+
 #include "Common/Common.h"
+#include "Common/Hash.h"
 
 // m_components
 enum
@@ -40,14 +43,6 @@ enum
 	VB_HAS_UVALL=(0xff<<15),
 	VB_HAS_UVTEXMTXSHIFT=13,
 };
-
-#ifdef WIN32
-#define LOADERDECL __cdecl
-#else
-#define LOADERDECL
-#endif
-
-typedef void (LOADERDECL *TPipelineFunction)();
 
 enum VarType
 {
@@ -87,6 +82,20 @@ struct PortableVertexDeclaration
 	}
 };
 
+namespace std
+{
+
+template <>
+struct hash<PortableVertexDeclaration>
+{
+	size_t operator()(const PortableVertexDeclaration& decl) const
+	{
+		return HashFletcher((u8 *) &decl, sizeof(decl));
+	}
+};
+
+}
+
 // The implementation of this class is specific for GL/DX, so NativeVertexFormat.cpp
 // is in the respective backend, not here in VideoCommon.
 
@@ -100,7 +109,8 @@ public:
 	virtual void Initialize(const PortableVertexDeclaration &vtx_decl) = 0;
 	virtual void SetupVertexPointers() = 0;
 
-	u32 GetVertexStride() const { return vertex_stride; }
+	u32 GetVertexStride() const { return vtx_decl.stride; }
+	const PortableVertexDeclaration& GetVertexDeclaration() const { return vtx_decl; }
 
 	// TODO: move this under private:
 	u32 m_components;  // VB_HAS_X. Bitmask telling what vertex components are present.
@@ -109,5 +119,5 @@ protected:
 	// Let subclasses construct.
 	NativeVertexFormat() {}
 
-	u32 vertex_stride;
+	PortableVertexDeclaration vtx_decl;
 };

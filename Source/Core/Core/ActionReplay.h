@@ -4,7 +4,11 @@
 
 #pragma once
 
-#include "Common/IniFile.h"
+#include <string>
+#include <vector>
+#include "Common/CommonTypes.h"
+
+class IniFile;
 
 namespace ActionReplay
 {
@@ -36,4 +40,5 @@ void UpdateActiveList();
 void EnableSelfLogging(bool enable);
 const std::vector<std::string> &GetSelfLog();
 bool IsSelfLogging();
+std::vector<ARCode>* GetARCodes();
 }  // namespace

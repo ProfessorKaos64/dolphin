@@ -1,7 +1,8 @@
-
-#include "Common/Atomic.h"
+#include "Common/Event.h"
 #include "Core/ConfigManager.h"
 
+#include "VideoCommon/AsyncRequests.h"
+#include "VideoCommon/BoundingBox.h"
 #include "VideoCommon/BPStructs.h"
 #include "VideoCommon/CommandProcessor.h"
 #include "VideoCommon/Fifo.h"
@@ -18,30 +19,15 @@
 
 bool s_BackendInitialized = false;
 
-volatile u32 s_swapRequested = false;
-u32 s_efbAccessRequested = false;
-volatile u32 s_FifoShuttingDown = false;
-
-static std::condition_variable s_perf_query_cond;
-static std::mutex s_perf_query_lock;
-static volatile bool s_perf_query_requested;
+static Common::Flag s_FifoShuttingDown;
 
 static volatile struct
 {
 	u32 xfbAddr;
 	u32 fbWidth;
+	u32 fbStride;
 	u32 fbHeight;
 } s_beginFieldArgs;
-
-static struct
-{
-	EFBAccessType type;
-	u32 x;
-	u32 y;
-	u32 Data;
-} s_accessEFBArgs;
-
-static u32 s_AccessEFBResult = 0;
 
 void VideoBackendHardware::EmuStateChange(EMUSTATE_CHANGE newState)
 {
@@ -57,7 +43,7 @@ void VideoBackendHardware::Video_EnterLoop()
 void VideoBackendHardware::Video_ExitLoop()
 {
 	ExitGpuLoop();
-	s_FifoShuttingDown = true;
+	s_FifoShuttingDown.Set();
 }
 
 void VideoBackendHardware::Video_SetRendering(bool bEnabled)
@@ -65,47 +51,14 @@ void VideoBackendHardware::Video_SetRendering(bool bEnabled)
 	Fifo_SetRendering(bEnabled);
 }
 
-// Run from the graphics thread (from Fifo.cpp)
-static void VideoFifo_CheckSwapRequest()
-{
-	if (g_ActiveConfig.bUseXFB)
-	{
-		if (Common::AtomicLoadAcquire(s_swapRequested))
-		{
-			EFBRectangle rc;
-			Renderer::Swap(s_beginFieldArgs.xfbAddr, s_beginFieldArgs.fbWidth, s_beginFieldArgs.fbHeight,rc);
-			Common::AtomicStoreRelease(s_swapRequested, false);
-		}
-	}
-}
-
-// Run from the graphics thread (from Fifo.cpp)
-void VideoFifo_CheckSwapRequestAt(u32 xfbAddr, u32 fbWidth, u32 fbHeight)
-{
-	if (g_ActiveConfig.bUseXFB)
-	{
-		if (Common::AtomicLoadAcquire(s_swapRequested))
-		{
-			u32 aLower = xfbAddr;
-			u32 aUpper = xfbAddr + 2 * fbWidth * fbHeight;
-			u32 bLower = s_beginFieldArgs.xfbAddr;
-			u32 bUpper = s_beginFieldArgs.xfbAddr + 2 * s_beginFieldArgs.fbWidth * s_beginFieldArgs.fbHeight;
-
-			if (addrRangesOverlap(aLower, aUpper, bLower, bUpper))
-				VideoFifo_CheckSwapRequest();
-		}
-	}
-}
-
 // Run from the CPU thread (from VideoInterface.cpp)
-void VideoBackendHardware::Video_BeginField(u32 xfbAddr, u32 fbWidth, u32 fbHeight)
+void VideoBackendHardware::Video_BeginField(u32 xfbAddr, u32 fbWidth, u32 fbStride, u32 fbHeight)
 {
 	if (s_BackendInitialized && g_ActiveConfig.bUseXFB)
 	{
-		if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bCPUThread)
-			VideoFifo_CheckSwapRequest();
 		s_beginFieldArgs.xfbAddr = xfbAddr;
 		s_beginFieldArgs.fbWidth = fbWidth;
+		s_beginFieldArgs.fbStride = fbStride;
 		s_beginFieldArgs.fbHeight = fbHeight;
 	}
 }
@@ -113,9 +66,19 @@ void VideoBackendHardware::Video_BeginField(u32 xfbAddr, u32 fbWidth, u32 fbHeig
 // Run from the CPU thread (from VideoInterface.cpp)
 void VideoBackendHardware::Video_EndField()
 {
-	if (s_BackendInitialized)
+	if (s_BackendInitialized && g_ActiveConfig.bUseXFB && g_renderer)
 	{
-		Common::AtomicStoreRelease(s_swapRequested, true);
+		SyncGPU(SYNC_GPU_SWAP);
+
+		AsyncRequests::Event e;
+		e.time = 0;
+		e.type = AsyncRequests::Event::SWAP_EVENT;
+
+		e.swap_event.xfbAddr = s_beginFieldArgs.xfbAddr;
+		e.swap_event.fbWidth = s_beginFieldArgs.fbWidth;
+		e.swap_event.fbStride = s_beginFieldArgs.fbStride;
+		e.swap_event.fbHeight = s_beginFieldArgs.fbHeight;
+		AsyncRequests::GetInstance()->PushEvent(e, false);
 	}
 }
 
@@ -136,59 +99,35 @@ bool VideoBackendHardware::Video_Screenshot(const std::string& filename)
 	return true;
 }
 
-void VideoFifo_CheckEFBAccess()
-{
-	if (Common::AtomicLoadAcquire(s_efbAccessRequested))
-	{
-		s_AccessEFBResult = g_renderer->AccessEFB(s_accessEFBArgs.type, s_accessEFBArgs.x, s_accessEFBArgs.y, s_accessEFBArgs.Data);
-
-		Common::AtomicStoreRelease(s_efbAccessRequested, false);
-	}
-}
-
 u32 VideoBackendHardware::Video_AccessEFB(EFBAccessType type, u32 x, u32 y, u32 InputData)
 {
-	if (s_BackendInitialized && g_ActiveConfig.bEFBAccessEnable)
+	if (!g_ActiveConfig.bEFBAccessEnable)
 	{
-		s_accessEFBArgs.type = type;
-		s_accessEFBArgs.x = x;
-		s_accessEFBArgs.y = y;
-		s_accessEFBArgs.Data = InputData;
-
-		Common::AtomicStoreRelease(s_efbAccessRequested, true);
-
-		if (SConfig::GetInstance().m_LocalCoreStartupParameter.bCPUThread)
-		{
-			while (Common::AtomicLoadAcquire(s_efbAccessRequested) && !s_FifoShuttingDown)
-				//Common::SleepCurrentThread(1);
-				Common::YieldCPU();
-		}
-		else
-			VideoFifo_CheckEFBAccess();
-
-		return s_AccessEFBResult;
+		return 0;
 	}
 
-	return 0;
-}
-
-static bool QueryResultIsReady()
-{
-	return !s_perf_query_requested || s_FifoShuttingDown;
-}
-
-static void VideoFifo_CheckPerfQueryRequest()
-{
-	if (s_perf_query_requested)
+	if (type == POKE_COLOR || type == POKE_Z)
 	{
-		g_perf_query->FlushResults();
-
-		{
-		std::lock_guard<std::mutex> lk(s_perf_query_lock);
-		s_perf_query_requested = false;
-		}
-
-		s_perf_query_cond.notify_one();
+		AsyncRequests::Event e;
+		e.type = type == POKE_COLOR ? AsyncRequests::Event::EFB_POKE_COLOR : AsyncRequests::Event::EFB_POKE_Z;
+		e.time = 0;
+		e.efb_poke.data = InputData;
+		e.efb_poke.x = x;
+		e.efb_poke.y = y;
+		AsyncRequests::GetInstance()->PushEvent(e, false);
+		return 0;
+	}
+	else
+	{
+		AsyncRequests::Event e;
+		u32 result;
+		e.type = type == PEEK_COLOR ? AsyncRequests::Event::EFB_PEEK_COLOR : AsyncRequests::Event::EFB_PEEK_Z;
+		e.time = 0;
+		e.efb_peek.x = x;
+		e.efb_peek.y = y;
+		e.efb_peek.data = &result;
+		AsyncRequests::GetInstance()->PushEvent(e, true);
+		return result;
 	}
 }
 
@@ -199,33 +138,42 @@ u32 VideoBackendHardware::Video_GetQueryResult(PerfQueryType type)
 		return 0;
 	}
 
-	// TODO: Is this check sane?
+	SyncGPU(SYNC_GPU_PERFQUERY);
+
+	AsyncRequests::Event e;
+	e.time = 0;
+	e.type = AsyncRequests::Event::PERF_QUERY;
+
 	if (!g_perf_query->IsFlushed())
-	{
-		if (SConfig::GetInstance().m_LocalCoreStartupParameter.bCPUThread)
-		{
-			s_perf_query_requested = true;
-			std::unique_lock<std::mutex> lk(s_perf_query_lock);
-			s_perf_query_cond.wait(lk, QueryResultIsReady);
-		}
-		else
-			g_perf_query->FlushResults();
-	}
+		AsyncRequests::GetInstance()->PushEvent(e, true);
 
 	return g_perf_query->GetQueryResult(type);
+}
+
+u16 VideoBackendHardware::Video_GetBoundingBox(int index)
+{
+	if (!g_ActiveConfig.backend_info.bSupportsBBox)
+		return BoundingBox::coords[index];
+
+	SyncGPU(SYNC_GPU_BBOX);
+
+	AsyncRequests::Event e;
+	u16 result;
+	e.time = 0;
+	e.type = AsyncRequests::Event::BBOX_READ;
+	e.bbox.index = index;
+	e.bbox.data = &result;
+	AsyncRequests::GetInstance()->PushEvent(e, true);
+
+	return result;
 }
 
 void VideoBackendHardware::InitializeShared()
 {
 	VideoCommon_Init();
 
-	s_swapRequested = 0;
-	s_efbAccessRequested = 0;
-	s_perf_query_requested = false;
-	s_FifoShuttingDown = 0;
+	s_FifoShuttingDown.Clear();
 	memset((void*)&s_beginFieldArgs, 0, sizeof(s_beginFieldArgs));
-	memset(&s_accessEFBArgs, 0, sizeof(s_accessEFBArgs));
-	s_AccessEFBResult = 0;
 	m_invalid = false;
 }
 
@@ -244,11 +192,7 @@ void VideoBackendHardware::DoState(PointerWrap& p)
 	VideoCommon_DoState(p);
 	p.DoMarker("VideoCommon");
 
-	p.Do(s_swapRequested);
-	p.Do(s_efbAccessRequested);
 	p.Do(s_beginFieldArgs);
-	p.Do(s_accessEFBArgs);
-	p.Do(s_AccessEFBResult);
 	p.DoMarker("VideoBackendHardware");
 
 	// Refresh state.
@@ -279,17 +223,9 @@ void VideoBackendHardware::PauseAndLock(bool doLock, bool unpauseOnUnlock)
 	Fifo_PauseAndLock(doLock, unpauseOnUnlock);
 }
 
-
 void VideoBackendHardware::RunLoop(bool enable)
 {
 	VideoCommon_RunLoop(enable);
-}
-
-void VideoFifo_CheckAsyncRequest()
-{
-	VideoFifo_CheckSwapRequest();
-	VideoFifo_CheckEFBAccess();
-	VideoFifo_CheckPerfQueryRequest();
 }
 
 void VideoBackendHardware::Video_GatherPipeBursted()
@@ -297,13 +233,18 @@ void VideoBackendHardware::Video_GatherPipeBursted()
 	CommandProcessor::GatherPipeBursted();
 }
 
-bool VideoBackendHardware::Video_IsPossibleWaitingSetDrawDone()
+void VideoBackendHardware::Video_Sync()
 {
-	return CommandProcessor::isPossibleWaitingSetDrawDone;
+	FlushGpu();
 }
 
 void VideoBackendHardware::RegisterCPMMIO(MMIO::Mapping* mmio, u32 base)
 {
 	CommandProcessor::RegisterMMIO(mmio, base);
+}
+
+void VideoBackendHardware::UpdateWantDeterminism(bool want)
+{
+	Fifo_UpdateWantDeterminism(want);
 }
 

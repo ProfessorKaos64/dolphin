@@ -4,9 +4,6 @@
 
 #pragma once
 
-// DO NOT EVER INCLUDE <windows.h> directly _or indirectly_ from this file
-// since it slows down the build a lot.
-
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -59,13 +56,6 @@ extern const char *netplay_dolphin_ver;
 	#endif
 #endif
 
-#define STACKALIGN
-
-#if __cplusplus >= 201103 || defined(_MSC_VER) || defined(__GXX_EXPERIMENTAL_CXX0X__)
-#define HAVE_CXX11_SYNTAX 1
-#endif
-
-#if HAVE_CXX11_SYNTAX
 // An inheritable class to disallow the copy constructor and operator= functions
 class NonCopyable
 {
@@ -77,24 +67,8 @@ private:
 	NonCopyable(NonCopyable&);
 	NonCopyable& operator=(NonCopyable& other);
 };
-#endif
 
-#ifdef __APPLE__
-// The Darwin ABI requires that stack frames be aligned to 16-byte boundaries.
-// This is only needed on i386 gcc - x86_64 already aligns to 16 bytes.
-#if defined __i386__ && defined __GNUC__
-#undef STACKALIGN
-#define STACKALIGN __attribute__((__force_align_arg_pointer__))
-#endif
-
-#elif defined _WIN32
-
-// Check MSC ver
-	#if !defined _MSC_VER || _MSC_VER <= 1000
-		#error needs at least version 1000 of MSC
-	#endif
-
-	#define NOMINMAX
+#if defined _WIN32
 
 // Memory leak checks
 	#define CHECK_HEAP_INTEGRITY()
@@ -107,7 +81,7 @@ private:
 	#define GC_ALIGNED16_DECL(x) __declspec(align(16)) x
 	#define GC_ALIGNED64_DECL(x) __declspec(align(64)) x
 
-// Since they are always around on windows
+// Since they are always around on Windows
 	#define HAVE_WX 1
 	#define HAVE_OPENAL 1
 
@@ -154,22 +128,6 @@ private:
 // Dummy macro for marking translatable strings that can not be immediately translated.
 // wxWidgets does not have a true dummy macro for this.
 #define _trans(a) a
-
-#if defined _M_GENERIC
-#  define _M_SSE 0x0
-#elif defined __GNUC__
-# if defined __SSE4_2__
-#  define _M_SSE 0x402
-# elif defined __SSE4_1__
-#  define _M_SSE 0x401
-# elif defined __SSSE3__
-#  define _M_SSE 0x301
-# elif defined __SSE3__
-#  define _M_SSE 0x300
-# endif
-#elif (_MSC_VER >= 1500) || __INTEL_COMPILER // Visual Studio 2008
-#  define _M_SSE 0x402
-#endif
 
 // Host communication.
 enum HOST_COMM

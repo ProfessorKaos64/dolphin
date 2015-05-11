@@ -5,7 +5,8 @@
 #pragma once
 
 #include "Common/ChunkFile.h"
-#include "InputCommon/InputConfig.h"
+
+class InputConfig;
 
 enum
 {
@@ -36,13 +37,14 @@ namespace Wiimote
 
 void Shutdown();
 void Initialize(void* const hwnd, bool wait = false);
+void LoadConfig();
 void Resume();
 void Pause();
 
 unsigned int GetAttached();
 void DoState(u8 **ptr, PointerWrap::Mode mode);
 void EmuStateChange(EMUSTATE_CHANGE newState);
-InputPlugin *GetPlugin();
+InputConfig* GetConfig();
 
 void ControlChannel(int _number, u16 _channelID, const void* _pData, u32 _Size);
 void InterruptChannel(int _number, u16 _channelID, const void* _pData, u32 _Size);

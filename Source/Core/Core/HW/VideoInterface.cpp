@@ -3,9 +3,10 @@
 // Refer to the license.txt file included.
 
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 
+#include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
 #include "Core/State.h"
@@ -136,10 +137,10 @@ void Preset(bool _bNTSC)
 	m_VBeamPos = 0; // RG4JC0 checks for a zero VBeamPos
 
 	// 54MHz, capable of progressive scan
-	m_Clock = Core::g_CoreStartupParameter.bProgressive;
+	m_Clock = SConfig::GetInstance().m_LocalCoreStartupParameter.bProgressive;
 
 	// Say component cable is plugged
-	m_DTVStatus.component_plugged = Core::g_CoreStartupParameter.bProgressive;
+	m_DTVStatus.component_plugged = SConfig::GetInstance().m_LocalCoreStartupParameter.bProgressive;
 
 	UpdateParameters();
 }
@@ -171,7 +172,7 @@ void Init()
 
 	fields = 1;
 
-	m_DTVStatus.ntsc_j = Core::g_CoreStartupParameter.bForceNTSCJ;
+	m_DTVStatus.ntsc_j = SConfig::GetInstance().m_LocalCoreStartupParameter.bForceNTSCJ;
 
 	for (UVIInterruptRegister& reg : m_InterruptRegister)
 	{
@@ -374,7 +375,7 @@ void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
 		})
 	);
 
-    // Map 8 bit reads (not writes) to 16 bit reads.
+	// Map 8 bit reads (not writes) to 16 bit reads.
 	for (int i = 0; i < 0x1000; i += 2)
 	{
 		mmio->Register(base | i,
@@ -387,19 +388,19 @@ void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
 		);
 	}
 
-    // Map 32 bit reads and writes to 16 bit reads and writes.
-    for (int i = 0; i < 0x1000; i += 4)
-    {
+	// Map 32 bit reads and writes to 16 bit reads and writes.
+	for (int i = 0; i < 0x1000; i += 4)
+	{
 		mmio->Register(base | i,
 			MMIO::ReadToSmaller<u32>(mmio, base | i, base | (i + 2)),
 			MMIO::WriteToSmaller<u32>(mmio, base | i, base | (i + 2))
 		);
-    }
+	}
 }
 
 void SetRegionReg(char region)
 {
-	if (!Core::g_CoreStartupParameter.bForceNTSCJ)
+	if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bForceNTSCJ)
 		m_DTVStatus.ntsc_j = region == 'J';
 }
 
@@ -475,14 +476,6 @@ void UpdateParameters()
 	}
 }
 
-int GetNumFields()
-{
-	if (Core::g_CoreStartupParameter.bVBeamSpeedHack)
-		return (2 / fields);
-	else
-		return 1;
-}
-
 unsigned int GetTicksPerLine()
 {
 	if (s_lineCount == 0)
@@ -491,10 +484,7 @@ unsigned int GetTicksPerLine()
 	}
 	else
 	{
-		if (Core::g_CoreStartupParameter.bVBeamSpeedHack)
-			return TicksPerFrame / s_lineCount;
-		else
-			return TicksPerFrame / (s_lineCount / (2 / fields)) ;
+		return TicksPerFrame / (s_lineCount / (2 / fields)) ;
 	}
 }
 
@@ -515,7 +505,8 @@ static void BeginField(FieldType field)
 	// What should actually happen is that we should pass on the correct width,
 	// stride, and height to the video backend, and it should deinterlace the
 	// output when appropriate.
-	u32 fbWidth = m_PictureConfiguration.STD * (field == FIELD_PROGRESSIVE ? 16 : 8);
+	u32 fbStride = m_PictureConfiguration.STD * (field == FIELD_PROGRESSIVE ? 16 : 8);
+	u32 fbWidth = m_PictureConfiguration.WPL * 16;
 	u32 fbHeight = m_VerticalTimingRegister.ACV * (field == FIELD_PROGRESSIVE ? 1 : 2);
 	u32 xfbAddr;
 
@@ -549,7 +540,7 @@ static void BeginField(FieldType field)
 			  m_VerticalTimingRegister.ACV, fieldTypeNames[field]);
 
 	if (xfbAddr)
-		g_video_backend->Video_BeginField(xfbAddr, fbWidth, fbHeight);
+		g_video_backend->Video_BeginField(xfbAddr, fbWidth, fbStride, fbHeight);
 }
 
 static void EndField()

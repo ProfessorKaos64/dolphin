@@ -4,7 +4,8 @@
 
 #pragma once
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
+#include "Common/Flag.h"
 #include "VideoCommon/VideoBackendBase.h"
 
 class PointerWrap;
@@ -16,11 +17,12 @@ namespace CommandProcessor
 {
 
 extern SCPFifoStruct fifo; //This one is shared between gfx thread and emulator thread.
-extern volatile bool isPossibleWaitingSetDrawDone; //This one is used for sync gfx thread and emulator thread.
+
 extern volatile bool interruptSet;
 extern volatile bool interruptWaiting;
 extern volatile bool interruptTokenWaiting;
 extern volatile bool interruptFinishWaiting;
+extern Common::Flag s_gpuMaySleep;
 
 // internal hardware addresses
 enum
@@ -135,17 +137,15 @@ void DoState(PointerWrap &p);
 
 void RegisterMMIO(MMIO::Mapping* mmio, u32 base);
 
-void SetCpStatus(bool isCPUThread = false);
+void SetCPStatusFromGPU();
+void SetCPStatusFromCPU();
 void GatherPipeBursted();
 void UpdateInterrupts(u64 userdata);
 void UpdateInterruptsFromVideoBackend(u64 userdata);
 
-bool AllowIdleSkipping();
-
 void SetCpClearRegister();
 void SetCpControlRegister();
 void SetCpStatusRegister();
-void ProcessFifoAllDistance();
 void ProcessFifoEvents();
 
 void Update();

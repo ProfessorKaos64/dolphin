@@ -9,14 +9,13 @@ set(SRCS	ActionReplay.cpp
 			ec_wii.cpp
 			GeckoCodeConfig.cpp
 			GeckoCode.cpp
+			HotkeyManager.cpp
+			MemTools.cpp
 			Movie.cpp
 			NetPlayClient.cpp
 			NetPlayServer.cpp
 			PatchEngine.cpp
 			State.cpp
-			stdafx.cpp
-			Tracer.cpp
-			VolumeHandler.cpp
 			Boot/Boot_BS2Emu.cpp
 			Boot/Boot.cpp
 			Boot/Boot_DOL.cpp
@@ -92,12 +91,15 @@ set(SRCS	ActionReplay.cpp
 			HW/EXI.cpp
 			HW/EXI_Device.cpp
 			HW/EXI_DeviceAD16.cpp
+			HW/EXI_DeviceAGP.cpp
 			HW/EXI_DeviceAMBaseboard.cpp
 			HW/EXI_DeviceEthernet.cpp
 			HW/EXI_DeviceGecko.cpp
 			HW/EXI_DeviceIPL.cpp
 			HW/EXI_DeviceMemoryCard.cpp
 			HW/EXI_DeviceMic.cpp
+			HW/GCKeyboard.cpp
+			HW/GCKeyboardEmu.cpp
 			HW/GCMemcard.cpp
 			HW/GCMemcardDirectory.cpp
 			HW/GCMemcardRaw.cpp
@@ -106,7 +108,6 @@ set(SRCS	ActionReplay.cpp
 			HW/GPFifo.cpp
 			HW/HW.cpp
 			HW/Memmap.cpp
-			HW/MemmapFunctions.cpp
 			HW/MemoryInterface.cpp
 			HW/MMIO.cpp
 			HW/ProcessorInterface.cpp
@@ -117,6 +118,7 @@ set(SRCS	ActionReplay.cpp
 			HW/SI_DeviceGBA.cpp
 			HW/SI_DeviceGCController.cpp
 			HW/SI_DeviceGCSteeringWheel.cpp
+			HW/SI_DeviceKeyboard.cpp
 			HW/Sram.cpp
 			HW/StreamADPCM.cpp
 			HW/SystemTimers.cpp
@@ -134,6 +136,7 @@ set(SRCS	ActionReplay.cpp
 			HW/WiimoteEmu/Encryption.cpp
 			HW/WiimoteEmu/Speaker.cpp
 			HW/WiimoteReal/WiimoteReal.cpp
+			HW/WiiSaveCrypted.cpp
 			IPC_HLE/ICMPLin.cpp
 			IPC_HLE/WII_IPC_HLE.cpp
 			IPC_HLE/WII_IPC_HLE_Device_DI.cpp
@@ -148,6 +151,7 @@ set(SRCS	ActionReplay.cpp
 			IPC_HLE/WII_IPC_HLE_Device_usb_kbd.cpp
 			IPC_HLE/WII_IPC_HLE_WiiMote.cpp
 			IPC_HLE/WiiMote_HID_Attr.cpp
+			PowerPC/MMU.cpp
 			PowerPC/PowerPC.cpp
 			PowerPC/PPCAnalyst.cpp
 			PowerPC/PPCCache.cpp
@@ -165,6 +169,7 @@ set(SRCS	ActionReplay.cpp
 			PowerPC/Interpreter/Interpreter_Paired.cpp
 			PowerPC/Interpreter/Interpreter_SystemRegisters.cpp
 			PowerPC/Interpreter/Interpreter_Tables.cpp
+			PowerPC/JitCommon/JitAsmCommon.cpp
 			PowerPC/JitCommon/JitBase.cpp
 			PowerPC/JitCommon/JitCache.cpp
 			PowerPC/JitILCommon/IR.cpp
@@ -180,7 +185,6 @@ set(SRCS	ActionReplay.cpp
 
 if(_M_X86)
 	set(SRCS ${SRCS}
-			x64MemTools.cpp
 			PowerPC/Jit64IL/IR_X86.cpp
 			PowerPC/Jit64IL/JitIL.cpp
 			PowerPC/Jit64IL/JitIL_Tables.cpp
@@ -196,13 +200,12 @@ if(_M_X86)
 			PowerPC/Jit64/Jit_Paired.cpp
 			PowerPC/Jit64/JitRegCache.cpp
 			PowerPC/Jit64/Jit_SystemRegisters.cpp
+			PowerPC/Jit64Common/Jit64AsmCommon.cpp
 			PowerPC/JitCommon/JitBackpatch.cpp
-			PowerPC/JitCommon/JitAsmCommon.cpp
-			PowerPC/JitCommon/Jit_Util.cpp)
-endif()
-if(_M_ARM_32)
+			PowerPC/JitCommon/Jit_Util.cpp
+			PowerPC/JitCommon/TrampolineCache.cpp)
+elseif(_M_ARM_32)
 	set(SRCS ${SRCS}
-			ArmMemTools.cpp
 			PowerPC/JitArm32/Jit.cpp
 			PowerPC/JitArm32/JitAsm.cpp
 			PowerPC/JitArm32/JitArm_BackPatch.cpp
@@ -219,26 +222,58 @@ if(_M_ARM_32)
 			PowerPC/JitArm32/JitArm_SystemRegisters.cpp
 			PowerPC/JitArm32/JitArm_LoadStoreFloating.cpp
 			)
+elseif(_M_ARM_64)
+	set(SRCS ${SRCS}
+	         PowerPC/JitArm64/Jit.cpp
+	         PowerPC/JitArm64/JitAsm.cpp
+	         PowerPC/JitArm64/JitArm64Cache.cpp
+	         PowerPC/JitArm64/JitArm64_RegCache.cpp
+	         PowerPC/JitArm64/JitArm64_BackPatch.cpp
+	         PowerPC/JitArm64/JitArm64_Branch.cpp
+	         PowerPC/JitArm64/JitArm64_FloatingPoint.cpp
+	         PowerPC/JitArm64/JitArm64_Integer.cpp
+	         PowerPC/JitArm64/JitArm64_LoadStore.cpp
+	         PowerPC/JitArm64/JitArm64_LoadStoreFloating.cpp
+	         PowerPC/JitArm64/JitArm64_Paired.cpp
+	         PowerPC/JitArm64/JitArm64_LoadStorePaired.cpp
+	         PowerPC/JitArm64/JitArm64_SystemRegisters.cpp
+	         PowerPC/JitArm64/Jit_Util.cpp
+	         PowerPC/JitArm64/JitArm64_Tables.cpp)
 endif()
 
-set(LIBS bdisasm inputcommon videoogl videosoftware sfml-network)
+set(LIBS
+	audiocommon
+	bdisasm
+	common
+	discio
+	enet
+	inputcommon
+	${LZO}
+	sfml-network
+	sfml-system
+	videoogl
+	videosoftware
+	z
+	)
 
 if(LIBUSB_FOUND)
 	# Using shared LibUSB
 	set(LIBS	${LIBS}	${LIBUSB_LIBRARIES})
-	set(SRCS	${SRCS}	IPC_HLE/WII_IPC_HLE_Device_hid.cpp)
+	set(SRCS	${SRCS}	IPC_HLE/WII_IPC_HLE_Device_hid.cpp
+	        	       	HW/SI_GCAdapter.cpp)
 endif(LIBUSB_FOUND)
 
 set(LIBS ${LIBS} ${POLARSSL_LIBRARY})
 
 if(WIN32)
-	set(SRCS ${SRCS} HW/BBA-TAP/TAP_Win32.cpp stdafx.cpp
-		HW/WiimoteReal/IOWin.cpp)
-elseif(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+	set(SRCS ${SRCS} HW/BBA-TAP/TAP_Win32.cpp HW/WiimoteReal/IOWin.cpp)
+elseif(APPLE)
 	set(SRCS ${SRCS} HW/BBA-TAP/TAP_Apple.cpp HW/WiimoteReal/IOdarwin.mm)
+	set(LIBS ${LIBS}
+		${IOB_LIBRARY})
 elseif(UNIX)
 	set(SRCS ${SRCS} HW/BBA-TAP/TAP_Unix.cpp)
-	if((${CMAKE_SYSTEM_NAME} MATCHES "Linux") AND BLUEZ_FOUND)
+	if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux" AND BLUEZ_FOUND)
 		set(SRCS ${SRCS} HW/WiimoteReal/IONix.cpp)
 		set(LIBS ${LIBS} bluetooth)
 	else()

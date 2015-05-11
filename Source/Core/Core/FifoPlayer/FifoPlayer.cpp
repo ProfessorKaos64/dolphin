@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
@@ -259,7 +259,7 @@ void FifoPlayer::WriteAllMemoryUpdates()
 {
 	_assert_(m_File);
 
-	for (size_t frameNum = 0; frameNum < m_File->GetFrameCount(); ++frameNum)
+	for (u32 frameNum = 0; frameNum < m_File->GetFrameCount(); ++frameNum)
 	{
 		const FifoFrameInfo &frame = m_File->GetFrame(frameNum);
 		for (auto& update : frame.memoryUpdates)
@@ -294,7 +294,7 @@ void FifoPlayer::WriteFifo(u8 *data, u32 start, u32 end)
 		while (written < burstEnd)
 			GPFifo::FastWrite8(data[written++]);
 
-		GPFifo::Write8(data[written++], 0);
+		GPFifo::Write8(data[written++]);
 
 		// Advance core timing
 		u32 elapsedCycles = u32(((u64)written * m_CyclesPerFrame) / m_FrameFifoSize);
@@ -348,6 +348,17 @@ void FifoPlayer::SetupFifo()
 
 void FifoPlayer::LoadMemory()
 {
+	UReg_MSR newMSR;
+	newMSR.DR = 1;
+	newMSR.IR = 1;
+	MSR = newMSR.Hex;
+	PowerPC::ppcState.spr[SPR_IBAT0U] = 0x80001fff;
+	PowerPC::ppcState.spr[SPR_IBAT0L] = 0x00000002;
+	PowerPC::ppcState.spr[SPR_DBAT0U] = 0x80001fff;
+	PowerPC::ppcState.spr[SPR_DBAT0L] = 0x00000002;
+	PowerPC::ppcState.spr[SPR_DBAT1U] = 0xc0001fff;
+	PowerPC::ppcState.spr[SPR_DBAT1L] = 0x0000002a;
+
 	Memory::Clear();
 
 	SetupFifo();
@@ -391,55 +402,55 @@ void FifoPlayer::LoadMemory()
 
 void FifoPlayer::WriteCP(u32 address, u16 value)
 {
-	Memory::Write_U16(value, 0xCC000000 | address);
+	PowerPC::Write_U16(value, 0xCC000000 | address);
 }
 
 void FifoPlayer::WritePI(u32 address, u32 value)
 {
-	Memory::Write_U32(value, 0xCC003000 | address);
+	PowerPC::Write_U32(value, 0xCC003000 | address);
 }
 
 void FifoPlayer::FlushWGP()
 {
 	// Send 31 0s through the WGP
 	for (int i = 0; i < 7; ++i)
-		GPFifo::Write32(0, 0);
-	GPFifo::Write16(0, 0);
-	GPFifo::Write8(0, 0);
+		GPFifo::Write32(0);
+	GPFifo::Write16(0);
+	GPFifo::Write8(0);
 
 	GPFifo::ResetGatherPipe();
 }
 
 void FifoPlayer::LoadBPReg(u8 reg, u32 value)
 {
-	GPFifo::Write8(0x61, 0); // load BP reg
+	GPFifo::Write8(0x61); // load BP reg
 
 	u32 cmd = (reg << 24) & 0xff000000;
 	cmd |= (value & 0x00ffffff);
-	GPFifo::Write32(cmd, 0);
+	GPFifo::Write32(cmd);
 }
 
 void FifoPlayer::LoadCPReg(u8 reg, u32 value)
 {
-	GPFifo::Write8(0x08, 0); // load CP reg
-	GPFifo::Write8(reg, 0);
-	GPFifo::Write32(value, 0);
+	GPFifo::Write8(0x08); // load CP reg
+	GPFifo::Write8(reg);
+	GPFifo::Write32(value);
 }
 
 void FifoPlayer::LoadXFReg(u16 reg, u32 value)
 {
-	GPFifo::Write8(0x10, 0); // load XF reg
-	GPFifo::Write32((reg & 0x0fff) | 0x1000, 0); // load 4 bytes into reg
-	GPFifo::Write32(value, 0);
+	GPFifo::Write8(0x10); // load XF reg
+	GPFifo::Write32((reg & 0x0fff) | 0x1000); // load 4 bytes into reg
+	GPFifo::Write32(value);
 }
 
 void FifoPlayer::LoadXFMem16(u16 address, u32 *data)
 {
 	// Loads 16 * 4 bytes in xf memory starting at address
-	GPFifo::Write8(0x10, 0); // load XF reg
-	GPFifo::Write32(0x000f0000 | (address & 0xffff), 0); // load 16 * 4 bytes into address
+	GPFifo::Write8(0x10); // load XF reg
+	GPFifo::Write32(0x000f0000 | (address & 0xffff)); // load 16 * 4 bytes into address
 	for (int i = 0; i < 16; ++i)
-		GPFifo::Write32(data[i], 0);
+		GPFifo::Write32(data[i]);
 }
 
 bool FifoPlayer::ShouldLoadBP(u8 address)
@@ -453,7 +464,7 @@ bool FifoPlayer::ShouldLoadBP(u8 address)
 	case BPMEM_LOADTLUT1:
 	case BPMEM_PERF1:
 		return false;
+	default:
+		return true;
 	}
-
-	return true;
 }

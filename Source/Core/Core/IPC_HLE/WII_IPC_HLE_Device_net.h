@@ -239,7 +239,7 @@ public:
 		}
 	}
 
-	u32 CalculateNwc24ConfigChecksum(void)
+	u32 CalculateNwc24ConfigChecksum()
 	{
 		u32* ptr = (u32*)&config;
 		u32 sum = 0;
@@ -250,7 +250,7 @@ public:
 		return sum;
 	}
 
-	s32 CheckNwc24Config(void)
+	s32 CheckNwc24Config()
 	{
 		if (Magic() != 0x57634366) /* 'WcCf' magic */
 		{
@@ -275,14 +275,14 @@ public:
 		return 0;
 	}
 
-	u32 Magic() {return Common::swap32(config.magic);}
-	void SetMagic(u32 magic) {config.magic = Common::swap32(magic);}
+	u32 Magic() const { return Common::swap32(config.magic); }
+	void SetMagic(u32 magic) { config.magic = Common::swap32(magic); }
 
-	u32 Unk() {return Common::swap32(config._unk_04);}
-	void SetUnk(u32 _unk_04) {config._unk_04 = Common::swap32(_unk_04);}
+	u32 Unk() const { return Common::swap32(config._unk_04); }
+	void SetUnk(u32 _unk_04) { config._unk_04 = Common::swap32(_unk_04); }
 
-	u32 IdGen() {return Common::swap32(config.id_generation);}
-	void SetIdGen(u32 id_generation) {config.id_generation = Common::swap32(id_generation);}
+	u32 IdGen() const { return Common::swap32(config.id_generation); }
+	void SetIdGen(u32 id_generation) { config.id_generation = Common::swap32(id_generation); }
 
 	void IncrementIdGen()
 	{
@@ -292,19 +292,19 @@ public:
 		SetIdGen(id_ctr);
 	}
 
-	u32 Checksum() {return Common::swap32(config.checksum);}
-	void SetChecksum(u32 checksum) {config.checksum = Common::swap32(checksum);}
+	u32 Checksum() const { return Common::swap32(config.checksum); }
+	void SetChecksum(u32 checksum) { config.checksum = Common::swap32(checksum); }
 
-	u32 CreationStage() {return Common::swap32(config.creation_stage);}
-	void SetCreationStage(u32 creation_stage) {config.creation_stage = Common::swap32(creation_stage);}
+	u32 CreationStage() const { return Common::swap32(config.creation_stage); }
+	void SetCreationStage(u32 creation_stage) { config.creation_stage = Common::swap32(creation_stage); }
 
-	u32 EnableBooting() {return Common::swap32(config.enable_booting);}
-	void SetEnableBooting(u32 enable_booting) {config.enable_booting = Common::swap32(enable_booting);}
+	u32 EnableBooting() const { return Common::swap32(config.enable_booting); }
+	void SetEnableBooting(u32 enable_booting) { config.enable_booting = Common::swap32(enable_booting); }
 
-	u64 Id() {return Common::swap64(config.nwc24_id);}
-	void SetId(u64 nwc24_id) {config.nwc24_id = Common::swap64(nwc24_id);}
+	u64 Id() const { return Common::swap64(config.nwc24_id); }
+	void SetId(u64 nwc24_id) { config.nwc24_id = Common::swap64(nwc24_id); }
 
-	const char* Email() {return config.email;}
+	const char* Email() const { return config.email; }
 	void SetEmail(const char* email)
 	{
 		strncpy(config.email, email, nwc24_config_t::MAX_EMAIL_LENGTH);
@@ -357,12 +357,12 @@ public:
 
 	void WriteToMem(const u32 address)
 	{
-		Memory::WriteBigEData((const u8*)&config, address, sizeof(config));
+		Memory::CopyToEmu(address, &config, sizeof(config));
 	}
 
 	void ReadFromMem(const u32 address)
 	{
-		Memory::ReadBigEData((u8*)&config, address, sizeof(config));
+		Memory::CopyFromEmu(&config, address, sizeof(config));
 	}
 
 	void ReadConfig()
@@ -391,9 +391,9 @@ public:
 
 	virtual ~CWII_IPC_HLE_Device_net_kd_request();
 
-	virtual bool Open(u32 _CommandAddress, u32 _Mode) override;
-	virtual bool Close(u32 _CommandAddress, bool _bForce) override;
-	virtual bool IOCtl(u32 _CommandAddress) override;
+	virtual IPCCommandResult Open(u32 _CommandAddress, u32 _Mode) override;
+	virtual IPCCommandResult Close(u32 _CommandAddress, bool _bForce) override;
+	virtual IPCCommandResult IOCtl(u32 _CommandAddress) override;
 
 private:
 	enum
@@ -422,7 +422,8 @@ private:
 		IOCTL_NWC24_REQUEST_SHUTDOWN                = 0x28,
 	};
 
-	enum {
+	enum
+	{
 		MODEL_RVT = 0,
 		MODEL_RVV = 0,
 		MODEL_RVL = 1,
@@ -430,8 +431,8 @@ private:
 		MODEL_ELSE = 7
 	};
 
-	u8 GetAreaCode(const std::string& area);
-	u8 GetHardwareModel(const std::string& model);
+	u8 GetAreaCode(const std::string& area) const;
+	u8 GetHardwareModel(const std::string& model) const;
 
 	s32 NWC24MakeUserID(u64* nwc24_id, u32 hollywood_id, u16 id_ctr, u8 hardware_model, u8 area_code);
 
@@ -453,22 +454,22 @@ public:
 	virtual ~CWII_IPC_HLE_Device_net_kd_time()
 	{}
 
-	virtual bool Open(u32 _CommandAddress, u32 _Mode) override
+	virtual IPCCommandResult Open(u32 _CommandAddress, u32 _Mode) override
 	{
 		INFO_LOG(WII_IPC_NET, "NET_KD_TIME: Open");
 		Memory::Write_U32(GetDeviceID(), _CommandAddress+4);
-		return true;
+		return IPC_DEFAULT_REPLY;
 	}
 
-	virtual bool Close(u32 _CommandAddress, bool _bForce) override
+	virtual IPCCommandResult Close(u32 _CommandAddress, bool _bForce) override
 	{
 		INFO_LOG(WII_IPC_NET, "NET_KD_TIME: Close");
 		if (!_bForce)
 			Memory::Write_U32(0, _CommandAddress + 4);
-		return true;
+		return IPC_DEFAULT_REPLY;
 	}
 
-	virtual bool IOCtl(u32 _CommandAddress) override
+	virtual IPCCommandResult IOCtl(u32 _CommandAddress) override
 	{
 		u32 Parameter = Memory::Read_U32(_CommandAddress + 0x0C);
 		u32 BufferIn  = Memory::Read_U32(_CommandAddress + 0x10);
@@ -511,7 +512,7 @@ public:
 		// write return values
 		Memory::Write_U32(common_result, BufferOut);
 		Memory::Write_U32(result, _CommandAddress + 4);
-		return true;
+		return IPC_DEFAULT_REPLY;
 	}
 
 private:
@@ -530,14 +531,14 @@ private:
 	// Seconds between 1.1.1970 and 4.1.2008 16:00:38
 	static const u64 wii_bias = 0x477E5826;
 
-	// Returns seconds since wii epoch
+	// Returns seconds since Wii epoch
 	// +/- any bias set from IOCTL_NW24_SET_UNIVERSAL_TIME
 	u64 GetAdjustedUTC() const
 	{
 		return Common::Timer::GetTimeSinceJan1970() - wii_bias + utcdiff;
 	}
 
-	// Store the difference between what the wii thinks is UTC and
+	// Store the difference between what the Wii thinks is UTC and
 	// what the host OS thinks
 	void SetAdjustedUTC(u64 wii_utc)
 	{
@@ -592,10 +593,10 @@ public:
 
 	virtual ~CWII_IPC_HLE_Device_net_ip_top();
 
-	virtual bool Open(u32 _CommandAddress, u32 _Mode) override;
-	virtual bool Close(u32 _CommandAddress, bool _bForce) override;
-	virtual bool IOCtl(u32 _CommandAddress) override;
-	virtual bool IOCtlV(u32 _CommandAddress) override;
+	virtual IPCCommandResult Open(u32 _CommandAddress, u32 _Mode) override;
+	virtual IPCCommandResult Close(u32 _CommandAddress, bool _bForce) override;
+	virtual IPCCommandResult IOCtl(u32 _CommandAddress) override;
+	virtual IPCCommandResult IOCtlV(u32 _CommandAddress) override;
 
 	virtual u32 Update() override;
 
@@ -616,9 +617,9 @@ public:
 
 	virtual ~CWII_IPC_HLE_Device_net_ncd_manage();
 
-	virtual bool Open(u32 _CommandAddress, u32 _Mode) override;
-	virtual bool Close(u32 _CommandAddress, bool _bForce) override;
-	virtual bool IOCtlV(u32 _CommandAddress) override;
+	virtual IPCCommandResult Open(u32 _CommandAddress, u32 _Mode) override;
+	virtual IPCCommandResult Close(u32 _CommandAddress, bool _bForce) override;
+	virtual IPCCommandResult IOCtlV(u32 _CommandAddress) override;
 
 private:
 	enum
@@ -644,9 +645,9 @@ public:
 
 	virtual ~CWII_IPC_HLE_Device_net_wd_command();
 
-	virtual bool Open(u32 CommandAddress, u32 Mode) override;
-	virtual bool Close(u32 CommandAddress, bool Force) override;
-	virtual bool IOCtlV(u32 CommandAddress) override;
+	virtual IPCCommandResult Open(u32 CommandAddress, u32 Mode) override;
+	virtual IPCCommandResult Close(u32 CommandAddress, bool Force) override;
+	virtual IPCCommandResult IOCtlV(u32 CommandAddress) override;
 
 private:
 	enum

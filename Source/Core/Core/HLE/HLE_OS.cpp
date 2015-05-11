@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 
 #include "Core/HLE/HLE_OS.h"
@@ -32,7 +32,7 @@ void HLE_OSPanic()
 void HLE_GeneralDebugPrint()
 {
 	std::string ReportMessage;
-	if (*(u32*)Memory::GetPointer(GPR(3)) > 0x80000000)
+	if (PowerPC::HostRead_U32(GPR(3)) > 0x80000000)
 	{
 		GetStringVA(ReportMessage, 4);
 	}
@@ -60,41 +60,35 @@ void HLE_write_console()
 void GetStringVA(std::string& _rOutBuffer, u32 strReg)
 {
 	_rOutBuffer = "";
-	char ArgumentBuffer[256];
+	std::string ArgumentBuffer = "";
 	u32 ParameterCounter = strReg+1;
 	u32 FloatingParameterCounter = 1;
-	char *pString = (char*)Memory::GetPointer(GPR(strReg));
-	if (!pString)
-	{
-		ERROR_LOG(OSREPORT, "r%i invalid", strReg);
-		return;
-	}
+	std::string string = PowerPC::HostGetString(GPR(strReg));
 
-	while (*pString)
+	for(u32 i = 0; i < string.size(); i++)
 	{
-		if (*pString == '%')
+		if (string[i] == '%')
 		{
-			char* pArgument = ArgumentBuffer;
-			*pArgument++ = *pString++;
-			if (*pString == '%') {
+			ArgumentBuffer = "%";
+			i++;
+			if (string[i] == '%')
+			{
 				_rOutBuffer += "%";
-				pString++;
 				continue;
 			}
-			while (*pString < 'A' || *pString > 'z' || *pString == 'l' || *pString == '-')
-				*pArgument++ = *pString++;
+			while (string[i] < 'A' || string[i] > 'z' || string[i] == 'l' || string[i] == '-')
+				ArgumentBuffer += string[i++];
 
-			*pArgument++ = *pString;
-			*pArgument = 0;
+			ArgumentBuffer += string[i];
 
 			u64 Parameter;
 			if (ParameterCounter > 10)
 			{
-				Parameter = Memory::Read_U32(GPR(1) + 0x8 + ((ParameterCounter - 11) * 4));
+				Parameter = PowerPC::HostRead_U32(GPR(1) + 0x8 + ((ParameterCounter - 11) * 4));
 			}
 			else
 			{
-				if ((*(pString-2) == 'l') && (*(pString-1) == 'l')) // hax, just seen this on sysmenu osreport
+				if (string[i-1] == 'l' && string[i-2] == 'l') // hax, just seen this on sysmenu osreport
 				{
 					Parameter = GPR(++ParameterCounter);
 					Parameter = (Parameter<<32)|GPR(++ParameterCounter);
@@ -104,23 +98,22 @@ void GetStringVA(std::string& _rOutBuffer, u32 strReg)
 			}
 			ParameterCounter++;
 
-			switch (*pString)
+			switch (string[i])
 			{
 			case 's':
-				_rOutBuffer += StringFromFormat(ArgumentBuffer, (char*)Memory::GetPointer((u32)Parameter));
+				_rOutBuffer += StringFromFormat(ArgumentBuffer.c_str(), PowerPC::HostGetString((u32)Parameter).c_str());
 				break;
 
 			case 'd':
 			case 'i':
 			{
-				//u64 Double = Memory::Read_U64(Parameter);
-				_rOutBuffer += StringFromFormat(ArgumentBuffer, Parameter);
+				_rOutBuffer += StringFromFormat(ArgumentBuffer.c_str(), Parameter);
 				break;
 			}
 
 			case 'f':
 			{
-				_rOutBuffer += StringFromFormat(ArgumentBuffer,
+				_rOutBuffer += StringFromFormat(ArgumentBuffer.c_str(),
 												rPS0(FloatingParameterCounter));
 				FloatingParameterCounter++;
 				ParameterCounter--;
@@ -128,23 +121,21 @@ void GetStringVA(std::string& _rOutBuffer, u32 strReg)
 			}
 
 			case 'p':
-				// Override, so 64bit dolphin prints 32bit pointers, since the ppc is 32bit :)
+				// Override, so 64bit Dolphin prints 32bit pointers, since the ppc is 32bit :)
 				_rOutBuffer += StringFromFormat("%x", (u32)Parameter);
 				break;
 
 			default:
-				_rOutBuffer += StringFromFormat(ArgumentBuffer, Parameter);
+				_rOutBuffer += StringFromFormat(ArgumentBuffer.c_str(), Parameter);
 				break;
 			}
-			pString++;
 		}
 		else
 		{
-			_rOutBuffer += StringFromFormat("%c", *pString);
-			pString++;
+			_rOutBuffer += string[i];
 		}
 	}
-	if (_rOutBuffer[_rOutBuffer.length() - 1] == '\n')
+	if (!_rOutBuffer.empty() && _rOutBuffer[_rOutBuffer.length() - 1] == '\n')
 		_rOutBuffer.resize(_rOutBuffer.length() - 1);
 }
 

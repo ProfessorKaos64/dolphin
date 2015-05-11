@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "VideoCommon/VideoCommon.h"
 
 // Log in two categories, and save three other options in the same byte
@@ -44,6 +44,15 @@ enum EFBScale
 	SCALE_4X,
 };
 
+enum StereoMode
+{
+	STEREO_OFF = 0,
+	STEREO_SBS,
+	STEREO_TAB,
+	STEREO_ANAGLYPH,
+	STEREO_3DVISION
+};
+
 // NEVER inherit from this class.
 struct VideoConfig final
 {
@@ -58,6 +67,7 @@ struct VideoConfig final
 	// General
 	bool bVSync;
 	bool bFullscreen;
+	bool bExclusiveMode;
 	bool bRunning;
 	bool bWidescreenHack;
 	int iAspectRatio;
@@ -65,19 +75,19 @@ struct VideoConfig final
 	bool bUseXFB;
 	bool bUseRealXFB;
 
-	// OpenMP
-	bool bOMPDecoder;
-
 	// Enhancements
 	int iMultisampleMode;
 	int iEFBScale;
 	bool bForceFiltering;
 	int iMaxAnisotropy;
 	std::string sPostProcessingShader;
+	int iStereoMode;
+	int iStereoDepth;
+	int iStereoConvergence;
+	bool bStereoSwapEyes;
 
 	// Information
 	bool bShowFPS;
-	bool bShowInputDisplay;
 	bool bOverlayStats;
 	bool bOverlayProjStats;
 	bool bTexFmtOverlayEnable;
@@ -93,33 +103,32 @@ struct VideoConfig final
 	// Utility
 	bool bDumpTextures;
 	bool bHiresTextures;
+	bool bConvertHiresTextures;
 	bool bDumpEFBTarget;
-	bool bDumpFrames;
 	bool bUseFFV1;
 	bool bFreeLook;
-	bool bAnaglyphStereo;
-	int iAnaglyphStereoSeparation;
-	int iAnaglyphFocalAngle;
 	bool bBorderlessFullscreen;
 
 	// Hacks
 	bool bEFBAccessEnable;
 	bool bPerfQueriesEnable;
 
-	bool bEFBCopyEnable;
-	bool bEFBCopyCacheEnable;
 	bool bEFBEmulateFormatChanges;
-	bool bCopyEFBToTexture;
+	bool bSkipEFBCopyToRam;
 	bool bCopyEFBScaled;
 	int iSafeTextureCache_ColorSamples;
 	int iPhackvalue[3];
 	std::string sPhackvalue[2];
 	float fAspectRatioHackW, fAspectRatioHackH;
-	bool bUseBBox;
 	bool bEnablePixelLighting;
 	bool bFastDepthCalc;
 	int iLog; // CONF_ bits
 	int iSaveTargetId; // TODO: Should be dropped
+
+	// Stereoscopy
+	bool bStereoEFBMonoDepth;
+	int iStereoDepthPercentage;
+	int iStereoConvergenceMinimum;
 
 	// D3D only config, mostly to be merged into the above
 	int iAdapter;
@@ -136,23 +145,26 @@ struct VideoConfig final
 		std::vector<std::string> Adapters; // for D3D
 		std::vector<std::string> AAModes;
 		std::vector<std::string> PPShaders; // post-processing shaders
+		std::vector<std::string> AnaglyphShaders; // anaglyph shaders
 
-		bool bUseRGBATextures; // used for D3D in TextureCache
-		bool bUseMinimalMipCount;
 		bool bSupportsExclusiveFullscreen;
 		bool bSupportsDualSourceBlend;
 		bool bSupportsPrimitiveRestart;
 		bool bSupportsOversizedViewports;
+		bool bSupportsGeometryShaders;
+		bool bSupports3DVision;
 		bool bSupportsEarlyZ; // needed by PixelShaderGen, so must stay in VideoCommon
 		bool bSupportsBindingLayout; // Needed by ShaderGen, so must stay in VideoCommon
+		bool bSupportsBBox;
+		bool bSupportsGSInstancing; // Needed by GeometryShaderGen, so must stay in VideoCommon
+		bool bSupportsPostProcessing;
+		bool bSupportsPaletteConversion;
 	} backend_info;
 
 	// Utility
 	bool RealXFBEnabled() const { return bUseXFB && bUseRealXFB; }
 	bool VirtualXFBEnabled() const { return bUseXFB && !bUseRealXFB; }
-	bool EFBCopiesToTextureEnabled() const { return bEFBCopyEnable && bCopyEFBToTexture; }
-	bool EFBCopiesToRamEnabled() const { return bEFBCopyEnable && !bCopyEFBToTexture; }
-	bool BorderlessFullscreenEnabled() const { return !backend_info.bSupportsExclusiveFullscreen || bBorderlessFullscreen; }
+	bool ExclusiveFullscreenEnabled() const { return backend_info.bSupportsExclusiveFullscreen && !bBorderlessFullscreen; }
 };
 
 extern VideoConfig g_Config;

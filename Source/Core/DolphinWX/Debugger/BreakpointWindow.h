@@ -4,19 +4,12 @@
 
 #pragma once
 
-#include <wx/chartype.h>
-#include <wx/defs.h>
-#include <wx/event.h>
-#include <wx/gdicmn.h>
 #include <wx/panel.h>
-#include <wx/string.h>
-#include <wx/windowid.h>
 #include <wx/aui/framemanager.h>
 
 class CBreakPointView;
 class CCodeWindow;
 class wxListEvent;
-class wxWindow;
 
 class CBreakPointWindow : public wxPanel
 {
@@ -39,11 +32,10 @@ public:
 	void OnAddMemoryCheck(wxCommandEvent& WXUNUSED(event));
 	void Event_SaveAll(wxCommandEvent& WXUNUSED(event));
 	void SaveAll();
-	void LoadAll(wxCommandEvent& WXUNUSED(event));
+	void Event_LoadAll(wxCommandEvent& WXUNUSED(event));
+	void LoadAll();
 
 private:
-	DECLARE_EVENT_TABLE();
-
 	wxAuiManager m_mgr;
 	CBreakPointView* m_BreakPointListView;
 	CCodeWindow* m_pCodeWindow;

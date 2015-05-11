@@ -5,7 +5,7 @@
 #pragma once
 
 #include <queue>
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 class PointerWrap;
 
@@ -19,12 +19,12 @@ public:
 	void Clear();
 	void Halt(bool _Halt);
 	void DoState(PointerWrap &p);
-	bool IsEmpty();
+	bool IsEmpty() const;
 
 	u16 ReadDSPMailboxHigh();
 	u16 ReadDSPMailboxLow();
 
-	u32 GetNextMail()
+	u32 GetNextMail() const
 	{
 		if (!m_Mails.empty())
 		{

@@ -7,10 +7,12 @@
 #include <functional>
 #include <string>
 
+#include "Common/CommonTypes.h"
+
 namespace OSD
 {
-// On-screen message display
-void AddMessage(const std::string& str, u32 ms = 2000);
+// On-screen message display (colored yellow by default)
+void AddMessage(const std::string& str, u32 ms = 2000, u32 rgba = 0xFFFFFF30);
 void DrawMessages(); // draw the current messages on the screen. Only call once per frame.
 void ClearMessages();
 

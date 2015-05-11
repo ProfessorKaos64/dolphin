@@ -24,9 +24,16 @@
 #include "Core/PowerPC/JitArm32/JitAsm.h"
 #include "Core/PowerPC/JitArm32/JitFPRCache.h"
 #include "Core/PowerPC/JitArm32/JitRegCache.h"
+#include "Core/PowerPC/JitArmCommon/BackPatch.h"
 #include "Core/PowerPC/JitCommon/JitBase.h"
 
 #define PPCSTATE_OFF(elem) ((s32)STRUCT_OFF(PowerPC::ppcState, elem) - (s32)STRUCT_OFF(PowerPC::ppcState, spr[0]))
+
+// Some asserts to make sure we will be able to load everything
+static_assert(PPCSTATE_OFF(spr[1023]) > -4096 && PPCSTATE_OFF(spr[1023]) < 4096, "LDR can't reach all of the SPRs");
+static_assert(PPCSTATE_OFF(ps[0][0]) >= -1020 && PPCSTATE_OFF(ps[0][0]) <= 1020, "VLDR can't reach all of the FPRs");
+static_assert((PPCSTATE_OFF(ps[0][0]) % 4) == 0, "VLDR requires FPRs to be 4 byte aligned");
+
 class JitArm : public JitBase, public ArmGen::ARMCodeBlock
 {
 private:
@@ -43,15 +50,30 @@ private:
 
 	PPCAnalyst::CodeBuffer code_buffer;
 
+	// The key is the backpatch flags
+	std::map<u32, BackPatchInfo> m_backpatch_info;
+
 	void DoDownCount();
 
-	void PrintDebug(UGeckoInstruction inst, u32 level);
+	void Helper_UpdateCR1(ArmGen::ARMReg fpscr, ArmGen::ARMReg temp);
 
-	void Helper_UpdateCR1(ARMReg fpscr, ARMReg temp);
+	void SetFPException(ArmGen::ARMReg Reg, u32 Exception);
 
-	void SetFPException(ARMReg Reg, u32 Exception);
+	ArmGen::FixupBranch JumpIfCRFieldBit(int field, int bit, bool jump_if_set);
 
-	FixupBranch JumpIfCRFieldBit(int field, int bit, bool jump_if_set);
+	void BeginTimeProfile(JitBlock* b);
+	void EndTimeProfile(JitBlock* b);
+
+	bool BackPatch(SContext* ctx);
+	bool DisasmLoadStore(const u8* ptr, u32* flags, ArmGen::ARMReg* rD, ArmGen::ARMReg* V1);
+	// Initializes the information that backpatching needs
+	// This is required so we know the backpatch routine sizes and trouble offsets
+	void InitBackpatch();
+
+	// Returns the trouble instruction offset
+	// Zero if it isn't a fastmem routine
+	u32 EmitBackpatchRoutine(ARMXEmitter* emit, u32 flags, bool fastmem, bool do_padding, ArmGen::ARMReg RS, ArmGen::ARMReg V1 = ArmGen::ARMReg::INVALID_REG);
+
 public:
 	JitArm() : code_buffer(32000) {}
 	~JitArm() {}
@@ -66,56 +88,47 @@ public:
 
 	JitBaseBlockCache *GetBlockCache() { return &blocks; }
 
-	const u8 *BackPatch(u8 *codePtr, u32 em_address, void *ctx);
-
-	bool IsInCodeSpace(u8 *ptr) { return IsInSpace(ptr); }
+	bool HandleFault(uintptr_t access_address, SContext* ctx) override;
 
 	void Trace();
 
 	void ClearCache();
 
-	const u8 *GetDispatcher() {
-		return asm_routines.dispatcher;
-	}
-	CommonAsmRoutinesBase *GetAsmRoutines() {
+	CommonAsmRoutinesBase *GetAsmRoutines()
+	{
 		return &asm_routines;
 	}
 
-	const char *GetName() {
+	const char *GetName()
+	{
 		return "JITARM";
 	}
-	// Run!
 
+	// Run!
 	void Run();
 	void SingleStep();
 
 	// Utilities for use by opcodes
 
 	void WriteExit(u32 destination);
-	void WriteExitDestInR(ARMReg Reg);
-	void WriteRfiExitDestInR(ARMReg Reg);
+	void WriteExitDestInR(ArmGen::ARMReg Reg);
+	void WriteRfiExitDestInR(ArmGen::ARMReg Reg);
 	void WriteExceptionExit();
 	void WriteCallInterpreter(UGeckoInstruction _inst);
 	void Cleanup();
 
-	void ComputeRC(ARMReg value, int cr = 0);
+	void ComputeRC(ArmGen::ARMReg value, int cr = 0);
 	void ComputeRC(s32 value, int cr);
 
 	void ComputeCarry();
 	void ComputeCarry(bool Carry);
-	void GetCarryAndClear(ARMReg reg);
-	void FinalizeCarry(ARMReg reg);
+	void GetCarryAndClear(ArmGen::ARMReg reg);
+	void FinalizeCarry(ArmGen::ARMReg reg);
 
-	// TODO: This shouldn't be here
-	void UnsafeStoreFromReg(ARMReg dest, ARMReg value, int accessSize, s32 offset);
-	void SafeStoreFromReg(bool fastmem, s32 dest, u32 value, s32 offsetReg, int accessSize, s32 offset);
-
-	void UnsafeLoadToReg(ARMReg dest, ARMReg addr, int accessSize, s32 offsetReg, s32 offset);
-	void SafeLoadToReg(bool fastmem, u32 dest, s32 addr, s32 offsetReg, int accessSize, s32 offset, bool signExtend, bool reverse);
-
+	void SafeStoreFromReg(s32 dest, u32 value, s32 offsetReg, int accessSize, s32 offset);
+	void SafeLoadToReg(ArmGen::ARMReg dest, s32 addr, s32 offsetReg, int accessSize, s32 offset, bool signExtend, bool reverse, bool update);
 
 	// OPCODES
-	void unknown_instruction(UGeckoInstruction _inst);
 	void FallBackToInterpreter(UGeckoInstruction _inst);
 	void DoNothing(UGeckoInstruction _inst);
 	void HLEFunction(UGeckoInstruction _inst);
@@ -143,7 +156,9 @@ public:
 	void subfic(UGeckoInstruction _inst);
 	void cntlzwx(UGeckoInstruction _inst);
 	void cmp (UGeckoInstruction _inst);
+	void cmpl(UGeckoInstruction _inst);
 	void cmpi(UGeckoInstruction _inst);
+	void cmpli(UGeckoInstruction _inst);
 	void negx(UGeckoInstruction _inst);
 	void mulhwux(UGeckoInstruction _inst);
 	void rlwimix(UGeckoInstruction _inst);
@@ -197,7 +212,6 @@ public:
 	// Floating point loadStore
 	void lfXX(UGeckoInstruction _inst);
 	void stfXX(UGeckoInstruction _inst);
-	void stfs(UGeckoInstruction _inst);
 
 	// Paired Singles
 	void ps_add(UGeckoInstruction _inst);

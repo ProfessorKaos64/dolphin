@@ -3,7 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 
 #include "Core/ConfigManager.h"
@@ -546,7 +546,7 @@ void CWII_IPC_HLE_WiiMote::ReceiveDisconnectionReq(u8 _Ident, u8* _pData, u32 _S
 //
 //
 
-// We assume WiiMote is always connected
+// We assume Wiimote is always connected
 void CWII_IPC_HLE_WiiMote::SendConnectionRequest(u16 scid, u16 psm)
 {
 	// create the channel
@@ -604,7 +604,7 @@ void CWII_IPC_HLE_WiiMote::SendConfigurationRequest(u16 scid, u16 MTU, u16 Flush
 	// (shuffle2) currently we end up not appending options. this is because we don't
 	// negotiate after trying to set MTU = 0 fails (stack will respond with
 	// "configuration failed" msg...). This is still fine, we'll just use whatever the
-	// bt stack defaults to.
+	// Bluetooth stack defaults to.
 	if (MTU || rChannel.MTU)
 	{
 		if (MTU == 0)
@@ -710,12 +710,11 @@ static int ParseAttribList(u8* pAttribIDList, u16& _startID, u16& _endID)
 	u8 seqSize  = attribList.Read8(attribOffset); attribOffset++;
 	u8 typeID   = attribList.Read8(attribOffset); attribOffset++;
 
-#if MAX_LOGLEVEL >= DEBUG_LEVEL
-	_dbg_assert_(WII_IPC_WIIMOTE, sequence == SDP_SEQ8);
-	(void)seqSize;
-#else
-	(void)sequence, (void)seqSize;
-#endif
+	if (MAX_LOGLEVEL >= LogTypes::LOG_LEVELS::LDEBUG)
+	{
+		_dbg_assert_(WII_IPC_WIIMOTE, sequence == SDP_SEQ8);
+		(void)seqSize;
+	}
 
 	if (typeID == SDP_UINT32)
 	{

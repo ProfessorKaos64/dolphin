@@ -6,7 +6,7 @@
 #include <cstdio>
 #include <string>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 
 bool DefaultMsgHandler(const char* caption, const char* text, bool yes_no, int Style);
@@ -74,7 +74,7 @@ bool MsgAlert(bool yes_no, int Style, const char* format, ...)
 
 	va_list args;
 	va_start(args, format);
-	CharArrayFromFormatV(buffer, sizeof(buffer)-1, str_translator(format).c_str(), args);
+	CharArrayFromFormatV(buffer, sizeof(buffer) - 1, str_translator(format).c_str(), args);
 	va_end(args);
 
 	ERROR_LOG(MASTER_LOG, "%s: %s", caption.c_str(), buffer);

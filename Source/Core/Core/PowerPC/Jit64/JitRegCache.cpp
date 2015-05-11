@@ -48,27 +48,6 @@ void RegCache::Start()
 	//But only preload IF written OR reads >= 3
 }
 
-// these are powerpc reg indices
-void RegCache::Lock(int p1, int p2, int p3, int p4)
-{
-	regs[p1].locked = true;
-	if (p2 != 0xFF) regs[p2].locked = true;
-	if (p3 != 0xFF) regs[p3].locked = true;
-	if (p4 != 0xFF) regs[p4].locked = true;
-}
-
-// these are x64 reg indices
-void RegCache::LockX(int x1, int x2, int x3, int x4)
-{
-	if (xregs[x1].locked) {
-		PanicAlert("RegCache: x %i already locked!", x1);
-	}
-	xregs[x1].locked = true;
-	if (x2 != 0xFF) xregs[x2].locked = true;
-	if (x3 != 0xFF) xregs[x3].locked = true;
-	if (x4 != 0xFF) xregs[x4].locked = true;
-}
-
 void RegCache::UnlockAll()
 {
 	for (auto& reg : regs)
@@ -79,6 +58,74 @@ void RegCache::UnlockAllX()
 {
 	for (auto& xreg : xregs)
 		xreg.locked = false;
+}
+
+BitSet32 GPRRegCache::GetRegUtilization()
+{
+	return jit->js.op->gprInReg;
+}
+
+BitSet32 FPURegCache::GetRegUtilization()
+{
+	return jit->js.op->gprInReg;
+}
+
+BitSet32 GPRRegCache::CountRegsIn(size_t preg, u32 lookahead)
+{
+	BitSet32 regsUsed;
+	for (u32 i = 1; i < lookahead; i++)
+	{
+		BitSet32 regsIn = jit->js.op[i].regsIn;
+		regsUsed |= regsIn;
+		if (regsIn[preg])
+			return regsUsed;
+	}
+	return regsUsed;
+}
+
+BitSet32 FPURegCache::CountRegsIn(size_t preg, u32 lookahead)
+{
+	BitSet32 regsUsed;
+	for (u32 i = 1; i < lookahead; i++)
+	{
+		BitSet32 regsIn = jit->js.op[i].fregsIn;
+		regsUsed |= regsIn;
+		if (regsIn[preg])
+			return regsUsed;
+	}
+	return regsUsed;
+}
+
+// Estimate roughly how bad it would be to de-allocate this register. Higher score
+// means more bad.
+float RegCache::ScoreRegister(X64Reg xr)
+{
+	size_t preg = xregs[xr].ppcReg;
+	float score = 0;
+
+	// If it's not dirty, we don't need a store to write it back to the register file, so
+	// bias a bit against dirty registers. Testing shows that a bias of 2 seems roughly
+	// right: 3 causes too many extra clobbers, while 1 saves very few clobbers relative
+	// to the number of extra stores it causes.
+	if (xregs[xr].dirty)
+		score += 2;
+
+	// If the register isn't actually needed in a physical register for a later instruction,
+	// writing it back to the register file isn't quite as bad.
+	if (GetRegUtilization()[preg])
+	{
+		// Don't look too far ahead; we don't want to have quadratic compilation times for
+		// enormous block sizes!
+		// This actually improves register allocation a tiny bit; I'm not sure why.
+		u32 lookahead = std::min(jit->js.instructionsLeft, 64);
+		// Count how many other registers are going to be used before we need this one again.
+		u32 regs_in_count = CountRegsIn(preg, lookahead).Count();
+		// Totally ad-hoc heuristic to bias based on how many other registers we'll need
+		// before this one gets used again.
+		score += 1 + 2 * (5 - log2f(1 + (float)regs_in_count));
+	}
+
+	return score;
 }
 
 X64Reg RegCache::GetFreeXReg()
@@ -93,21 +140,33 @@ X64Reg RegCache::GetFreeXReg()
 			return (X64Reg)xr;
 		}
 	}
-	//Okay, not found :( Force grab one
 
-	//TODO - add a pass to grab xregs whose ppcreg is not used in the next 3 instructions
+	// Okay, not found; run the register allocator heuristic and figure out which register we should
+	// clobber.
+	float min_score = std::numeric_limits<float>::max();
+	X64Reg best_xreg = INVALID_REG;
+	size_t best_preg = 0;
 	for (size_t i = 0; i < aCount; i++)
 	{
-		X64Reg xr = (X64Reg)aOrder[i];
-		if (xregs[xr].locked)
+		X64Reg xreg = (X64Reg)aOrder[i];
+		size_t preg = xregs[xreg].ppcReg;
+		if (xregs[xreg].locked || regs[preg].locked)
 			continue;
-		size_t preg = xregs[xr].ppcReg;
-		if (!regs[preg].locked)
+		float score = ScoreRegister(xreg);
+		if (score < min_score)
 		{
-			StoreFromRegister(preg);
-			return xr;
+			min_score = score;
+			best_xreg = xreg;
+			best_preg = preg;
 		}
 	}
+
+	if (best_xreg != INVALID_REG)
+	{
+		StoreFromRegister(best_preg);
+		return best_xreg;
+	}
+
 	//Still no dice? Die!
 	_assert_msg_(DYNA_REC, 0, "Regcache ran out of regs");
 	return INVALID_REG;
@@ -172,14 +231,10 @@ const int* GPRRegCache::GetAllocationOrder(size_t& count)
 	static const int allocationOrder[] =
 	{
 		// R12, when used as base register, for example in a LEA, can generate bad code! Need to look into this.
-#if _M_X86_64
 #ifdef _WIN32
-		RSI, RDI, R13, R14, R8, R9, R10, R11, R12, //, RCX
+		RSI, RDI, R13, R14, R15, R8, R9, R10, R11, R12, RCX
 #else
-		RBP, R13, R14, R8, R9, R10, R11, R12, //, RCX
-#endif
-#elif _M_X86_32
-		ESI, EDI, EBX, EBP, EDX, ECX,
+		R12, R13, R14, R15, RSI, RDI, R8, R9, R10, R11, RCX
 #endif
 	};
 	count = sizeof(allocationOrder) / sizeof(const int);
@@ -190,11 +245,7 @@ const int* FPURegCache::GetAllocationOrder(size_t& count)
 {
 	static const int allocationOrder[] =
 	{
-#if _M_X86_64
 		XMM6, XMM7, XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15, XMM2, XMM3, XMM4, XMM5
-#elif _M_X86_32
-		XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
-#endif
 	};
 	count = sizeof(allocationOrder) / sizeof(int);
 	return allocationOrder;
@@ -202,12 +253,12 @@ const int* FPURegCache::GetAllocationOrder(size_t& count)
 
 OpArg GPRRegCache::GetDefaultLocation(size_t reg) const
 {
-	return M(&ppcState.gpr[reg]);
+	return PPCSTATE(gpr[reg]);
 }
 
 OpArg FPURegCache::GetDefaultLocation(size_t reg) const
 {
-	return M(&ppcState.ps[reg][0]);
+	return PPCSTATE(ps[reg][0]);
 }
 
 void RegCache::KillImmediate(size_t preg, bool doLoad, bool makeDirty)
@@ -303,10 +354,6 @@ void GPRRegCache::StoreRegister(size_t preg, OpArg newLoc)
 
 void FPURegCache::LoadRegister(size_t preg, X64Reg newLoc)
 {
-	if (!regs[preg].location.IsImm() && (regs[preg].location.offset & 0xF))
-	{
-		PanicAlert("WARNING - misaligned fp register location %" PRIx64, preg);
-	}
 	emit->MOVAPD(newLoc, regs[preg].location);
 }
 
@@ -315,20 +362,21 @@ void FPURegCache::StoreRegister(size_t preg, OpArg newLoc)
 	emit->MOVAPD(newLoc, regs[preg].location.GetSimpleReg());
 }
 
-void RegCache::Flush(FlushMode mode)
+void RegCache::Flush(FlushMode mode, BitSet32 regsToFlush)
 {
-	for (size_t i = 0; i < xregs.size(); i++)
+	for (unsigned int i = 0; i < xregs.size(); i++)
 	{
 		if (xregs[i].locked)
-			PanicAlert("Someone forgot to unlock X64 reg %" PRIx64, i);
+			PanicAlert("Someone forgot to unlock X64 reg %u", i);
 	}
 
-	for (size_t i = 0; i < regs.size(); i++)
+	for (unsigned int i : regsToFlush)
 	{
 		if (regs[i].locked)
 		{
-			PanicAlert("Someone forgot to unlock PPC reg %" PRIx64 " (X64 reg %i).", i, RX(i));
+			PanicAlert("Someone forgot to unlock PPC reg %u (X64 reg %i).", i, RX(i));
 		}
+
 		if (regs[i].away)
 		{
 			if (regs[i].location.IsSimpleReg() || regs[i].location.IsImm())
@@ -337,8 +385,19 @@ void RegCache::Flush(FlushMode mode)
 			}
 			else
 			{
-				_assert_msg_(DYNA_REC,0,"Jit64 - Flush unhandled case, reg %" PRIx64 " PC: %08x", i, PC);
+				_assert_msg_(DYNA_REC,0,"Jit64 - Flush unhandled case, reg %u PC: %08x", i, PC);
 			}
 		}
 	}
+}
+
+int RegCache::NumFreeRegisters()
+{
+	int count = 0;
+	size_t aCount;
+	const int* aOrder = GetAllocationOrder(aCount);
+	for (size_t i = 0; i < aCount; i++)
+		if (!xregs[aOrder[i]].locked && xregs[aOrder[i]].free)
+			count++;
+	return count;
 }

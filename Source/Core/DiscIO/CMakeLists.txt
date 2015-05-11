@@ -1,14 +1,10 @@
-set(SRCS	BannerLoader.cpp
-			BannerLoaderGC.cpp
-			BannerLoaderWii.cpp
-			Blob.cpp
+set(SRCS	Blob.cpp
 			CISOBlob.cpp
 			WbfsBlob.cpp
 			CompressedBlob.cpp
 			DiscScrubber.cpp
 			DriveBlob.cpp
 			FileBlob.cpp
-			FileHandlerARC.cpp
 			FileMonitor.cpp
 			FileSystemGCWii.cpp
 			Filesystem.cpp

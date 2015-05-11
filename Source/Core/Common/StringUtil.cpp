@@ -14,24 +14,39 @@
 #include <string>
 #include <vector>
 
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 
 #ifdef _WIN32
 	#include <Windows.h>
 #else
 	#include <iconv.h>
+	#include <locale.h>
 	#include <errno.h>
+#endif
+
+#if !defined(_WIN32) && !defined(ANDROID)
+static locale_t GetCLocale()
+{
+	static locale_t c_locale = newlocale(LC_ALL_MASK, "C", nullptr);
+	return c_locale;
+}
 #endif
 
 // faster than sscanf
 bool AsciiToHex(const std::string& _szValue, u32& result)
 {
+	// Set errno to a good state.
+	errno = 0;
+
 	char *endptr = nullptr;
 	const u32 value = strtoul(_szValue.c_str(), &endptr, 16);
 
 	if (!endptr || *endptr)
+		return false;
+
+	if (errno == ERANGE)
 		return false;
 
 	result = value;
@@ -66,12 +81,18 @@ bool CharArrayFromFormatV(char* out, int outsize, const char* format, va_list ar
 	// will be present in the middle of a multibyte sequence.
 	//
 	// This is why we lookup an ANSI (cp1252) locale here and use _vsnprintf_l.
-	static locale_t c_locale = nullptr;
+	static _locale_t c_locale = nullptr;
 	if (!c_locale)
 		c_locale = _create_locale(LC_ALL, ".1252");
 	writtenCount = _vsnprintf_l(out, outsize, format, c_locale, args);
 #else
+	#if !defined(ANDROID)
+	locale_t previousLocale = uselocale(GetCLocale());
+	#endif
 	writtenCount = vsnprintf(out, outsize, format, args);
+	#if !defined(ANDROID)
+	uselocale(previousLocale);
+	#endif
 #endif
 
 	if (writtenCount > 0 && writtenCount < outsize)
@@ -89,28 +110,36 @@ bool CharArrayFromFormatV(char* out, int outsize, const char* format, va_list ar
 std::string StringFromFormat(const char* format, ...)
 {
 	va_list args;
+	va_start(args, format);
+	std::string res = StringFromFormatV(format, args);
+	va_end(args);
+	return std::move(res);
+}
+
+std::string StringFromFormatV(const char* format, va_list args)
+{
 	char *buf = nullptr;
 #ifdef _WIN32
-	int required = 0;
-
-	va_start(args, format);
-	required = _vscprintf(format, args);
+	int required = _vscprintf(format, args);
 	buf = new char[required + 1];
 	CharArrayFromFormatV(buf, required + 1, format, args);
-	va_end(args);
 
 	std::string temp = buf;
 	delete[] buf;
 #else
-	va_start(args, format);
+	#if !defined(ANDROID)
+	locale_t previousLocale = uselocale(GetCLocale());
+	#endif
 	if (vasprintf(&buf, format, args) < 0)
 		ERROR_LOG(COMMON, "Unable to allocate memory for string");
-	va_end(args);
+	#if !defined(ANDROID)
+	uselocale(previousLocale);
+	#endif
 
 	std::string temp = buf;
 	free(buf);
 #endif
-	return temp;
+	return std::move(temp);
 }
 
 // For Debugging. Read out an u8 array.
@@ -212,7 +241,7 @@ bool SplitPath(const std::string& full_path, std::string* _pPath, std::string* _
 		return false;
 
 	size_t dir_end = full_path.find_last_of("/"
-	// windows needs the : included for something like just "C:" to be considered a directory
+	// Windows needs the : included for something like just "C:" to be considered a directory
 #ifdef _WIN32
 		":"
 #endif
@@ -275,138 +304,18 @@ std::string TabsToSpaces(int tab_size, const std::string &in)
 
 std::string ReplaceAll(std::string result, const std::string& src, const std::string& dest)
 {
-	while (1)
+	size_t pos = 0;
+
+	if (src == dest)
+		return result;
+
+	while ((pos = result.find(src, pos)) != std::string::npos)
 	{
-		size_t pos = result.find(src);
-		if (pos == std::string::npos) break;
 		result.replace(pos, src.size(), dest);
+		pos += dest.length();
 	}
+
 	return result;
-}
-
-// UriDecode and UriEncode are from http://www.codeguru.com/cpp/cpp/string/conversions/print.php/c12759
-// by jinq0123 (November 2, 2006)
-
-// Uri encode and decode.
-// RFC1630, RFC1738, RFC2396
-
-//#include <string>
-//#include <assert.h>
-
-const char HEX2DEC[256] =
-{
-	/*       0  1  2  3   4  5  6  7   8  9  A  B   C  D  E  F */
-	/* 0 */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-	/* 1 */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-	/* 2 */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-	/* 3 */  0, 1, 2, 3,  4, 5, 6, 7,  8, 9,16,16, 16,16,16,16,
-
-	/* 4 */ 16,10,11,12, 13,14,15,16, 16,16,16,16, 16,16,16,16,
-	/* 5 */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-	/* 6 */ 16,10,11,12, 13,14,15,16, 16,16,16,16, 16,16,16,16,
-	/* 7 */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-
-	/* 8 */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-	/* 9 */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-	/* A */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-	/* B */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-
-	/* C */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-	/* D */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-	/* E */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16,
-	/* F */ 16,16,16,16, 16,16,16,16, 16,16,16,16, 16,16,16,16
-};
-
-std::string UriDecode(const std::string & sSrc)
-{
-	// Note from RFC1630:  "Sequences which start with a percent sign
-	// but are not followed by two hexadecimal characters (0-9, A-F) are reserved
-	// for future extension"
-
-	const unsigned char * pSrc = (const unsigned char *)sSrc.c_str();
-	const size_t SRC_LEN = sSrc.length();
-	const unsigned char * const SRC_END = pSrc + SRC_LEN;
-	const unsigned char * const SRC_LAST_DEC = SRC_END - 2;   // last decodable '%'
-
-	char * const pStart = new char[SRC_LEN];
-	char * pEnd = pStart;
-
-	while (pSrc < SRC_LAST_DEC)
-	{
-		if (*pSrc == '%')
-		{
-			char dec1, dec2;
-			if (16 != (dec1 = HEX2DEC[*(pSrc + 1)]) &&
-			    16 != (dec2 = HEX2DEC[*(pSrc + 2)]))
-			{
-				*pEnd++ = (dec1 << 4) + dec2;
-				pSrc += 3;
-				continue;
-			}
-		}
-
-		*pEnd++ = *pSrc++;
-	}
-
-	// the last 2- chars
-	while (pSrc < SRC_END)
-		*pEnd++ = *pSrc++;
-
-	std::string sResult(pStart, pEnd);
-	delete [] pStart;
-	return sResult;
-}
-
-// Only alphanum is safe.
-const char SAFE[256] =
-{
-	/*      0 1 2 3  4 5 6 7  8 9 A B  C D E F */
-	/* 0 */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-	/* 1 */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-	/* 2 */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-	/* 3 */ 1,1,1,1, 1,1,1,1, 1,1,0,0, 0,0,0,0,
-
-	/* 4 */ 0,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1,
-	/* 5 */ 1,1,1,1, 1,1,1,1, 1,1,1,0, 0,0,0,0,
-	/* 6 */ 0,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1,
-	/* 7 */ 1,1,1,1, 1,1,1,1, 1,1,1,0, 0,0,0,0,
-
-	/* 8 */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-	/* 9 */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-	/* A */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-	/* B */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-
-	/* C */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-	/* D */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-	/* E */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-	/* F */ 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0
-};
-
-std::string UriEncode(const std::string & sSrc)
-{
-	const char DEC2HEX[16 + 1] = "0123456789ABCDEF";
-	const unsigned char * pSrc = (const unsigned char *)sSrc.c_str();
-	const size_t SRC_LEN = sSrc.length();
-	unsigned char * const pStart = new unsigned char[SRC_LEN * 3];
-	unsigned char * pEnd = pStart;
-	const unsigned char * const SRC_END = pSrc + SRC_LEN;
-
-	for (; pSrc < SRC_END; ++pSrc)
-	{
-		if (SAFE[*pSrc])
-			*pEnd++ = *pSrc;
-		else
-		{
-			// escape this char
-			*pEnd++ = '%';
-			*pEnd++ = DEC2HEX[*pSrc >> 4];
-			*pEnd++ = DEC2HEX[*pSrc & 0x0F];
-		}
-	}
-
-	std::string sResult((char *)pStart, (char *)pEnd);
-	delete [] pStart;
-	return sResult;
 }
 
 #ifdef _WIN32

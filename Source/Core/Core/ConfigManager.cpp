@@ -2,12 +2,13 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/IniFile.h"
 #include "Core/ConfigManager.h"
 #include "Core/HW/SI.h"
+#include "Core/PowerPC/PowerPC.h"
 #include "DiscIO/NANDContentLoader.h"
 
 SConfig* SConfig::m_Instance;
@@ -18,98 +19,128 @@ static const struct
 	const int   DefaultKey;
 	const int   DefaultModifier;
 } g_HKData[] = {
+	{ "Open",                  79  /* 'O' */,        2 /* wxMOD_CONTROL */ },
+	{ "ChangeDisc",            0,                    0 /* wxMOD_NONE */    },
+	{ "RefreshList",           0,                    0 /* wxMOD_NONE */    },
 #ifdef __APPLE__
-	{ "Open",                79 /* 'O' */,        2 /* wxMOD_CMD */ },
-	{ "ChangeDisc",          0,                   0 /* wxMOD_NONE */ },
-	{ "RefreshList",         0,                   0 /* wxMOD_NONE */ },
+	{ "PlayPause",             80  /* 'P' */,        2 /* wxMOD_CMD */     },
+	{ "Stop",                  87  /* 'W' */,        2 /* wxMOD_CMD */     },
+	{ "Reset",                 0,                    0 /* wxMOD_NONE */    },
+	{ "FrameAdvance",          0,                    0 /* wxMOD_NONE */    },
 
-	{ "PlayPause",           80 /* 'P' */,        2 /* wxMOD_CMD */ },
-	{ "Stop",                87 /* 'W' */,        2 /* wxMOD_CMD */ },
-	{ "Reset",               0,                   0 /* wxMOD_NONE */ },
-	{ "FrameAdvance",        0,                   0 /* wxMOD_NONE */ },
+	{ "StartRecording",        0,                    0 /* wxMOD_NONE */    },
+	{ "PlayRecording",         0,                    0 /* wxMOD_NONE */    },
+	{ "ExportRecording",       0,                    0 /* wxMOD_NONE */    },
+	{ "Readonlymode",          0,                    0 /* wxMOD_NONE */    },
 
-	{ "StartRecording",      0,                   0 /* wxMOD_NONE */ },
-	{ "PlayRecording",       0,                   0 /* wxMOD_NONE */ },
-	{ "ExportRecording",     0,                   0 /* wxMOD_NONE */ },
-	{ "Readonlymode",        0,                   0 /* wxMOD_NONE */ },
+	{ "ToggleFullscreen",      70  /* 'F' */,        2 /* wxMOD_CMD */     },
+	{ "Screenshot",            83  /* 'S' */,        2 /* wxMOD_CMD */     },
+	{ "Exit",                  0,                    0 /* wxMOD_NONE */    },
 
-	{ "ToggleFullscreen",    70 /* 'F' */,        2 /* wxMOD_CMD */ },
-	{ "Screenshot",          83 /* 'S' */,        2 /* wxMOD_CMD */ },
-	{ "Exit",                0,                   0 /* wxMOD_NONE */ },
-
-	{ "Wiimote1Connect",     49 /* '1' */,        2 /* wxMOD_CMD */ },
-	{ "Wiimote2Connect",     50 /* '2' */,        2 /* wxMOD_CMD */ },
-	{ "Wiimote3Connect",     51 /* '3' */,        2 /* wxMOD_CMD */ },
-	{ "Wiimote4Connect",     52 /* '4' */,        2 /* wxMOD_CMD */ },
-	{ "BalanceBoardConnect", 53 /* '4' */,        2 /* wxMOD_CMD */ },
+	{ "Wiimote1Connect",       49  /* '1' */,        2 /* wxMOD_CMD */     },
+	{ "Wiimote2Connect",       50  /* '2' */,        2 /* wxMOD_CMD */     },
+	{ "Wiimote3Connect",       51  /* '3' */,        2 /* wxMOD_CMD */     },
+	{ "Wiimote4Connect",       52  /* '4' */,        2 /* wxMOD_CMD */     },
+	{ "BalanceBoardConnect",   53  /* '4' */,        2 /* wxMOD_CMD */     },
 #else
-	{ "Open",                79 /* 'O' */,        2 /* wxMOD_CONTROL */},
-	{ "ChangeDisc",          0,                   0 /* wxMOD_NONE */ },
-	{ "RefreshList",         0,                   0 /* wxMOD_NONE */ },
+	{ "PlayPause",             349 /* WXK_F10 */,    0 /* wxMOD_NONE */    },
+	{ "Stop",                  27  /* WXK_ESCAPE */, 0 /* wxMOD_NONE */    },
+	{ "Reset",                 0,                    0 /* wxMOD_NONE */    },
+	{ "FrameAdvance",          0,                    0 /* wxMOD_NONE */    },
 
-	{ "PlayPause",           349 /* WXK_F10 */,   0 /* wxMOD_NONE */ },
-	{ "Stop",                27 /* WXK_ESCAPE */, 0 /* wxMOD_NONE */ },
-	{ "Reset",               0,                   0 /* wxMOD_NONE */ },
-	{ "FrameAdvance",        0,                   0 /* wxMOD_NONE */ },
+	{ "StartRecording",        0,                    0 /* wxMOD_NONE */    },
+	{ "PlayRecording",         0,                    0 /* wxMOD_NONE */    },
+	{ "ExportRecording",       0,                    0 /* wxMOD_NONE */    },
+	{ "Readonlymode",          0,                    0 /* wxMOD_NONE */    },
 
-	{ "StartRecording",      0,                   0 /* wxMOD_NONE */ },
-	{ "PlayRecording",       0,                   0 /* wxMOD_NONE */ },
-	{ "ExportRecording",     0,                   0 /* wxMOD_NONE */ },
-	{ "Readonlymode",        0,                   0 /* wxMOD_NONE */ },
+	{ "ToggleFullscreen",      13  /* WXK_RETURN */, 1 /* wxMOD_ALT */     },
+	{ "Screenshot",            348 /* WXK_F9 */,     0 /* wxMOD_NONE */    },
+	{ "Exit",                  0,                    0 /* wxMOD_NONE */    },
 
-	{ "ToggleFullscreen",   13 /* WXK_RETURN */,  1 /* wxMOD_ALT */ },
-	{ "Screenshot",         348 /* WXK_F9 */,     0 /* wxMOD_NONE */ },
-	{ "Exit",                0,                   0 /* wxMOD_NONE */ },
-
-	{ "Wiimote1Connect",    344 /* WXK_F5 */,     1 /* wxMOD_ALT */ },
-	{ "Wiimote2Connect",    345 /* WXK_F6 */,     1 /* wxMOD_ALT */ },
-	{ "Wiimote3Connect",    346 /* WXK_F7 */,     1 /* wxMOD_ALT */ },
-	{ "Wiimote4Connect",    347 /* WXK_F8 */,     1 /* wxMOD_ALT */ },
-	{ "BalanceBoardConnect",348 /* WXK_F9 */,     1 /* wxMOD_ALT */ },
+	{ "Wiimote1Connect",       344 /* WXK_F5 */,     1 /* wxMOD_ALT */     },
+	{ "Wiimote2Connect",       345 /* WXK_F6 */,     1 /* wxMOD_ALT */     },
+	{ "Wiimote3Connect",       346 /* WXK_F7 */,     1 /* wxMOD_ALT */     },
+	{ "Wiimote4Connect",       347 /* WXK_F8 */,     1 /* wxMOD_ALT */     },
+	{ "BalanceBoardConnect",   348 /* WXK_F9 */,     1 /* wxMOD_ALT */     },
 #endif
-	{ "ToggleIR",            0,                   0 /* wxMOD_NONE */ },
-	{ "ToggleAspectRatio",   0,                   0 /* wxMOD_NONE */ },
-	{ "ToggleEFBCopies",     0,                   0 /* wxMOD_NONE */ },
-	{ "ToggleFog",           0,                   0 /* wxMOD_NONE */ },
-	{ "ToggleThrottle",      9 /* '\t' */,        0 /* wxMOD_NONE */ },
-	{ "IncreaseFrameLimit",  0,                   0 /* wxMOD_NONE */ },
-	{ "DecreaseFrameLimit",  0,                   0 /* wxMOD_NONE */ },
-	{ "LoadStateSlot1",      340 /* WXK_F1 */,    0 /* wxMOD_NONE */ },
-	{ "LoadStateSlot2",      341 /* WXK_F2 */,    0 /* wxMOD_NONE */ },
-	{ "LoadStateSlot3",      342 /* WXK_F3 */,    0 /* wxMOD_NONE */ },
-	{ "LoadStateSlot4",      343 /* WXK_F4 */,    0 /* wxMOD_NONE */ },
-	{ "LoadStateSlot5",      344 /* WXK_F5 */,    0 /* wxMOD_NONE */ },
-	{ "LoadStateSlot6",      345 /* WXK_F6 */,    0 /* wxMOD_NONE */ },
-	{ "LoadStateSlot7",      346 /* WXK_F7 */,    0 /* wxMOD_NONE */ },
-	{ "LoadStateSlot8",      347 /* WXK_F8 */,    0 /* wxMOD_NONE */ },
-	{ "LoadStateSlot9",      0,                   0 /* wxMOD_NONE */ },
-	{ "LoadStateSlot10",     0,                   0 /* wxMOD_NONE */ },
 
-	{ "SaveStateSlot1",      340 /* WXK_F1 */,    4 /* wxMOD_SHIFT */ },
-	{ "SaveStateSlot2",      341 /* WXK_F2 */,    4 /* wxMOD_SHIFT */ },
-	{ "SaveStateSlot3",      342 /* WXK_F3 */,    4 /* wxMOD_SHIFT */ },
-	{ "SaveStateSlot4",      343 /* WXK_F4 */,    4 /* wxMOD_SHIFT */ },
-	{ "SaveStateSlot5",      344 /* WXK_F5 */,    4 /* wxMOD_SHIFT */ },
-	{ "SaveStateSlot6",      345 /* WXK_F6 */,    4 /* wxMOD_SHIFT */ },
-	{ "SaveStateSlot7",      346 /* WXK_F7 */,    4 /* wxMOD_SHIFT */ },
-	{ "SaveStateSlot8",      347 /* WXK_F8 */,    4 /* wxMOD_SHIFT */ },
-	{ "SaveStateSlot9",      0,                   0 /* wxMOD_NONE */ },
-	{ "SaveStateSlot10",     0,                   0 /* wxMOD_NONE */ },
+	{ "VolumeDown",            0,                    0 /* wxMOD_NONE */    },
+	{ "VolumeUp",              0,                    0 /* wxMOD_NONE */    },
+	{ "VolumeToggleMute",      0,                    0 /* wxMOD_NONE */    },
 
-	{ "LoadLastState1",      0,                   0 /* wxMOD_NONE */ },
-	{ "LoadLastState2",      0,                   0 /* wxMOD_NONE */ },
-	{ "LoadLastState3",      0,                   0 /* wxMOD_NONE */ },
-	{ "LoadLastState4",      0,                   0 /* wxMOD_NONE */ },
-	{ "LoadLastState5",      0,                   0 /* wxMOD_NONE */ },
-	{ "LoadLastState6",      0,                   0 /* wxMOD_NONE */ },
-	{ "LoadLastState7",      0,                   0 /* wxMOD_NONE */ },
-	{ "LoadLastState8",      0,                   0 /* wxMOD_NONE */ },
+	{ "ToggleIR",              0,                    0 /* wxMOD_NONE */    },
+	{ "ToggleAspectRatio",     0,                    0 /* wxMOD_NONE */    },
+	{ "ToggleEFBCopies",       0,                    0 /* wxMOD_NONE */    },
+	{ "ToggleFog",             0,                    0 /* wxMOD_NONE */    },
+	{ "ToggleThrottle",        9   /* '\t' */,       0 /* wxMOD_NONE */    },
+	{ "DecreaseFrameLimit",    0,                    0 /* wxMOD_NONE */    },
+	{ "IncreaseFrameLimit",    0,                    0 /* wxMOD_NONE */    },
 
-	{ "SaveFirstState",      0,                   0 /* wxMOD_NONE */ },
-	{ "UndoLoadState",       351 /* WXK_F12 */,   0 /* wxMOD_NONE */ },
-	{ "UndoSaveState",       351 /* WXK_F12 */,   4 /* wxMOD_SHIFT */ },
-	{ "SaveStateFile",       0,                   0 /* wxMOD_NONE */ },
-	{ "LoadStateFile",       0,                   0 /* wxMOD_NONE */ },
+	{ "FreelookDecreaseSpeed", 49  /* '1' */,        4 /* wxMOD_SHIFT */   },
+	{ "FreelookIncreaseSpeed", 50  /* '2' */,        4 /* wxMOD_SHIFT */   },
+	{ "FreelookResetSpeed",    70  /* 'F' */,        4 /* wxMOD_SHIFT */   },
+	{ "FreelookUp",            69  /* 'E' */,        4 /* wxMOD_SHIFT */   },
+	{ "FreelookDown",          81  /* 'Q' */,        4 /* wxMOD_SHIFT */   },
+	{ "FreelookLeft",          65  /* 'A' */,        4 /* wxMOD_SHIFT */   },
+	{ "FreelookRight",         68  /* 'D' */,        4 /* wxMOD_SHIFT */   },
+	{ "FreelookZoomIn",        87  /* 'W' */,        4 /* wxMOD_SHIFT */   },
+	{ "FreelookZoomOut",       83  /* 'S' */,        4 /* wxMOD_SHIFT */   },
+	{ "FreelookReset",         82  /* 'R' */,        4 /* wxMOD_SHIFT */   },
+
+	{ "DecreaseDepth",         0,                    0 /* wxMOD_NONE */    },
+	{ "IncreaseDepth",         0,                    0 /* wxMOD_NONE */    },
+	{ "DecreaseConvergence",   0,                    0 /* wxMOD_NONE */    },
+	{ "IncreaseConvergence",   0,                    0 /* wxMOD_NONE */    },
+
+	{ "LoadStateSlot1",        340 /* WXK_F1 */,     0 /* wxMOD_NONE */    },
+	{ "LoadStateSlot2",        341 /* WXK_F2 */,     0 /* wxMOD_NONE */    },
+	{ "LoadStateSlot3",        342 /* WXK_F3 */,     0 /* wxMOD_NONE */    },
+	{ "LoadStateSlot4",        343 /* WXK_F4 */,     0 /* wxMOD_NONE */    },
+	{ "LoadStateSlot5",        344 /* WXK_F5 */,     0 /* wxMOD_NONE */    },
+	{ "LoadStateSlot6",        345 /* WXK_F6 */,     0 /* wxMOD_NONE */    },
+	{ "LoadStateSlot7",        346 /* WXK_F7 */,     0 /* wxMOD_NONE */    },
+	{ "LoadStateSlot8",        347 /* WXK_F8 */,     0 /* wxMOD_NONE */    },
+	{ "LoadStateSlot9",        0,                    0 /* wxMOD_NONE */    },
+	{ "LoadStateSlot10",       0,                    0 /* wxMOD_NONE */    },
+
+	{ "SaveStateSlot1",        340 /* WXK_F1 */,     4 /* wxMOD_SHIFT */   },
+	{ "SaveStateSlot2",        341 /* WXK_F2 */,     4 /* wxMOD_SHIFT */   },
+	{ "SaveStateSlot3",        342 /* WXK_F3 */,     4 /* wxMOD_SHIFT */   },
+	{ "SaveStateSlot4",        343 /* WXK_F4 */,     4 /* wxMOD_SHIFT */   },
+	{ "SaveStateSlot5",        344 /* WXK_F5 */,     4 /* wxMOD_SHIFT */   },
+	{ "SaveStateSlot6",        345 /* WXK_F6 */,     4 /* wxMOD_SHIFT */   },
+	{ "SaveStateSlot7",        346 /* WXK_F7 */,     4 /* wxMOD_SHIFT */   },
+	{ "SaveStateSlot8",        347 /* WXK_F8 */,     4 /* wxMOD_SHIFT */   },
+	{ "SaveStateSlot9",        0,                    0 /* wxMOD_NONE */    },
+	{ "SaveStateSlot10",       0,                    0 /* wxMOD_NONE */    },
+
+	{ "SelectStateSlot1",      0,                    0 /* wxMOD_NONE */    },
+	{ "SelectStateSlot2",      0,                    0 /* wxMOD_NONE */    },
+	{ "SelectStateSlot3",      0,                    0 /* wxMOD_NONE */    },
+	{ "SelectStateSlot4",      0,                    0 /* wxMOD_NONE */    },
+	{ "SelectStateSlot5",      0,                    0 /* wxMOD_NONE */    },
+	{ "SelectStateSlot6",      0,                    0 /* wxMOD_NONE */    },
+	{ "SelectStateSlot7",      0,                    0 /* wxMOD_NONE */    },
+	{ "SelectStateSlot8",      0,                    0 /* wxMOD_NONE */    },
+	{ "SelectStateSlot9",      0,                    0 /* wxMOD_NONE */    },
+	{ "SelectStateSlot10",     0,                    0 /* wxMOD_NONE */    },
+	{ "SaveSelectedSlot",      0,                    0 /* wxMOD_NONE */    },
+	{ "LoadSelectedSlot",      0,                    0 /* wxMOD_NONE */    },
+
+	{ "LoadLastState1",        0,                    0 /* wxMOD_NONE */    },
+	{ "LoadLastState2",        0,                    0 /* wxMOD_NONE */    },
+	{ "LoadLastState3",        0,                    0 /* wxMOD_NONE */    },
+	{ "LoadLastState4",        0,                    0 /* wxMOD_NONE */    },
+	{ "LoadLastState5",        0,                    0 /* wxMOD_NONE */    },
+	{ "LoadLastState6",        0,                    0 /* wxMOD_NONE */    },
+	{ "LoadLastState7",        0,                    0 /* wxMOD_NONE */    },
+	{ "LoadLastState8",        0,                    0 /* wxMOD_NONE */    },
+
+	{ "SaveFirstState",        0,                    0 /* wxMOD_NONE */    },
+	{ "UndoLoadState",         351 /* WXK_F12 */,    0 /* wxMOD_NONE */    },
+	{ "UndoSaveState",         351 /* WXK_F12 */,    4 /* wxMOD_SHIFT */   },
+	{ "SaveStateFile",         0,                    0 /* wxMOD_NONE */    },
+	{ "LoadStateFile",         0,                    0 /* wxMOD_NONE */    },
 };
 
 SConfig::SConfig()
@@ -164,28 +195,32 @@ void SConfig::SaveGeneralSettings(IniFile& ini)
 	// General
 	general->Set("LastFilename", m_LastFilename);
 	general->Set("ShowLag", m_ShowLag);
+	general->Set("ShowFrameCount", m_ShowFrameCount);
 
 	// ISO folders
 	// Clear removed folders
 	int oldPaths;
 	int numPaths = (int)m_ISOFolder.size();
-	general->Get("GCMPathes", &oldPaths, 0);
+	general->Get("ISOPaths", &oldPaths, 0);
 	for (int i = numPaths; i < oldPaths; i++)
 	{
-		ini.DeleteKey("General", StringFromFormat("GCMPath%i", i));
+		ini.DeleteKey("General", StringFromFormat("ISOPath%i", i));
 	}
 
-	general->Set("GCMPathes", numPaths);
+	general->Set("ISOPaths", numPaths);
 	for (int i = 0; i < numPaths; i++)
 	{
-		general->Set(StringFromFormat("GCMPath%i", i), m_ISOFolder[i]);
+		general->Set(StringFromFormat("ISOPath%i", i), m_ISOFolder[i]);
 	}
 
-	general->Set("RecursiveGCMPaths", m_RecursiveISOFolder);
+	general->Set("RecursiveISOPaths", m_RecursiveISOFolder);
 	general->Set("NANDRootPath", m_NANDPath);
 	general->Set("WirelessMac", m_WirelessMac);
 
 #ifdef USE_GDBSTUB
+#ifndef _WIN32
+	general->Set("GDBSocket", m_LocalCoreStartupParameter.gdb_socket);
+#endif
 	general->Set("GDBPort", m_LocalCoreStartupParameter.iGDBPort);
 #endif
 }
@@ -210,6 +245,7 @@ void SConfig::SaveInterfaceSettings(IniFile& ini)
 	interface->Set("ShowLogConfigWindow", m_InterfaceLogConfigWindow);
 	interface->Set("ExtendedFPSInfo", m_InterfaceExtendedFPSInfo);
 	interface->Set("ThemeName40", m_LocalCoreStartupParameter.theme_name);
+	interface->Set("PauseOnFocusLost", m_PauseOnFocusLost);
 }
 
 void SConfig::SaveHotkeySettings(IniFile& ini)
@@ -253,10 +289,16 @@ void SConfig::SaveGameListSettings(IniFile& ini)
 	gamelist->Set("ListJap", m_ListJap);
 	gamelist->Set("ListPal", m_ListPal);
 	gamelist->Set("ListUsa", m_ListUsa);
+	gamelist->Set("ListAustralia", m_ListAustralia);
 	gamelist->Set("ListFrance", m_ListFrance);
+	gamelist->Set("ListGermany", m_ListGermany);
 	gamelist->Set("ListItaly", m_ListItaly);
 	gamelist->Set("ListKorea", m_ListKorea);
+	gamelist->Set("ListNetherlands", m_ListNetherlands);
+	gamelist->Set("ListRussia", m_ListRussia);
+	gamelist->Set("ListSpain", m_ListSpain);
 	gamelist->Set("ListTaiwan", m_ListTaiwan);
+	gamelist->Set("ListWorld", m_ListWorld);
 	gamelist->Set("ListUnknown", m_ListUnknown);
 	gamelist->Set("ListSort", m_ListSort);
 	gamelist->Set("ListSortSecondary", m_ListSort2);
@@ -265,7 +307,7 @@ void SConfig::SaveGameListSettings(IniFile& ini)
 
 	gamelist->Set("ColumnPlatform", m_showSystemColumn);
 	gamelist->Set("ColumnBanner", m_showBannerColumn);
-	gamelist->Set("ColumnNotes", m_showNotesColumn);
+	gamelist->Set("ColumnNotes", m_showMakerColumn);
 	gamelist->Set("ColumnID", m_showIDColumn);
 	gamelist->Set("ColumnRegion", m_showRegionColumn);
 	gamelist->Set("ColumnSize", m_showSizeColumn);
@@ -280,10 +322,10 @@ void SConfig::SaveCoreSettings(IniFile& ini)
 	core->Set("CPUCore", m_LocalCoreStartupParameter.iCPUCore);
 	core->Set("Fastmem", m_LocalCoreStartupParameter.bFastmem);
 	core->Set("CPUThread", m_LocalCoreStartupParameter.bCPUThread);
-	core->Set("DSPThread", m_LocalCoreStartupParameter.bDSPThread);
 	core->Set("DSPHLE", m_LocalCoreStartupParameter.bDSPHLE);
 	core->Set("SkipIdle", m_LocalCoreStartupParameter.bSkipIdle);
-	core->Set("DefaultGCM", m_LocalCoreStartupParameter.m_strDefaultGCM);
+	core->Set("SyncOnSkipIdle", m_LocalCoreStartupParameter.bSyncGPUOnSkipIdleHack);
+	core->Set("DefaultISO", m_LocalCoreStartupParameter.m_strDefaultISO);
 	core->Set("DVDRoot", m_LocalCoreStartupParameter.m_strDVDRoot);
 	core->Set("Apploader", m_LocalCoreStartupParameter.m_strApploader);
 	core->Set("EnableCheats", m_LocalCoreStartupParameter.bEnableCheats);
@@ -292,6 +334,8 @@ void SConfig::SaveCoreSettings(IniFile& ini)
 	core->Set("Latency", m_LocalCoreStartupParameter.iLatency);
 	core->Set("MemcardAPath", m_strMemoryCardA);
 	core->Set("MemcardBPath", m_strMemoryCardB);
+	core->Set("AgpCartAPath", m_strGbaCartA);
+	core->Set("AgpCartBPath", m_strGbaCartB);
 	core->Set("SlotA", m_EXIDevice[0]);
 	core->Set("SlotB", m_EXIDevice[1]);
 	core->Set("SerialPort1", m_EXIDevice[2]);
@@ -308,7 +352,12 @@ void SConfig::SaveCoreSettings(IniFile& ini)
 	core->Set("RunCompareClient", m_LocalCoreStartupParameter.bRunCompareClient);
 	core->Set("FrameLimit", m_Framelimit);
 	core->Set("FrameSkip", m_FrameSkip);
+	core->Set("Overclock", m_OCFactor);
+	core->Set("OverclockEnable", m_OCEnable);
 	core->Set("GFXBackend", m_LocalCoreStartupParameter.m_strVideoBackend);
+	core->Set("GPUDeterminismMode", m_LocalCoreStartupParameter.m_strGPUDeterminismMode);
+	core->Set("GameCubeAdapter", m_GameCubeAdapter);
+	core->Set("AdapterRumble", m_AdapterRumble);
 }
 
 void SConfig::SaveMovieSettings(IniFile& ini)
@@ -317,6 +366,9 @@ void SConfig::SaveMovieSettings(IniFile& ini)
 
 	movie->Set("PauseMovie", m_PauseMovie);
 	movie->Set("Author", m_strMovieAuthor);
+	movie->Set("DumpFrames", m_DumpFrames);
+	movie->Set("DumpFramesSilent", m_DumpFramesSilent);
+	movie->Set("ShowInputDisplay", m_ShowInputDisplay);
 }
 
 void SConfig::SaveDSPSettings(IniFile& ini)
@@ -370,27 +422,56 @@ void SConfig::LoadGeneralSettings(IniFile& ini)
 
 	general->Get("LastFilename", &m_LastFilename);
 	general->Get("ShowLag", &m_ShowLag, false);
+	general->Get("ShowFrameCount", &m_ShowFrameCount, false);
 #ifdef USE_GDBSTUB
+#ifndef _WIN32
+	general->Get("GDBSocket", &m_LocalCoreStartupParameter.gdb_socket, "");
+#endif
 	general->Get("GDBPort", &(m_LocalCoreStartupParameter.iGDBPort), -1);
 #endif
 
 	m_ISOFolder.clear();
-	int numGCMPaths;
+	int numISOPaths;
 
-	if (general->Get("GCMPathes", &numGCMPaths, 0))
+	if (general->Get("ISOPaths", &numISOPaths, 0))
 	{
-		for (int i = 0; i < numGCMPaths; i++)
+		for (int i = 0; i < numISOPaths; i++)
 		{
 			std::string tmpPath;
-			general->Get(StringFromFormat("GCMPath%i", i), &tmpPath, "");
+			general->Get(StringFromFormat("ISOPath%i", i), &tmpPath, "");
 			m_ISOFolder.push_back(std::move(tmpPath));
 		}
 	}
+	// Check for old file path (Changed in 4.0-4003)
+	// This can probably be removed after 5.0 stable is launched
+	else if (general->Get("GCMPathes", &numISOPaths, 0))
+	{
+		for (int i = 0; i < numISOPaths; i++)
+		{
+			std::string tmpPath;
+			general->Get(StringFromFormat("GCMPath%i", i), &tmpPath, "");
+			bool found = false;
+			for (size_t j = 0; j < m_ISOFolder.size(); ++j)
+			{
+				if (m_ISOFolder[j] == tmpPath)
+				{
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+				m_ISOFolder.push_back(std::move(tmpPath));
+		}
+	}
 
-	general->Get("RecursiveGCMPaths", &m_RecursiveISOFolder, false);
+	if (!general->Get("RecursiveISOPaths", &m_RecursiveISOFolder, false))
+	{
+		// Check for old name
+		general->Get("RecursiveGCMPaths", &m_RecursiveISOFolder, false);
+	}
 
 	general->Get("NANDRootPath", &m_NANDPath);
-	m_NANDPath = File::GetUserPath(D_WIIROOT_IDX, m_NANDPath);
+	File::SetUserPath(D_WIIROOT_IDX, m_NANDPath);
 	DiscIO::cUIDsys::AccessInstance().UpdateLocation();
 	DiscIO::CSharedContent::AccessInstance().UpdateLocation();
 	general->Get("WirelessMac", &m_WirelessMac);
@@ -416,6 +497,7 @@ void SConfig::LoadInterfaceSettings(IniFile& ini)
 	interface->Get("ShowLogConfigWindow",     &m_InterfaceLogConfigWindow,                    false);
 	interface->Get("ExtendedFPSInfo",         &m_InterfaceExtendedFPSInfo,                    false);
 	interface->Get("ThemeName40",             &m_LocalCoreStartupParameter.theme_name,        "Clean");
+	interface->Get("PauseOnFocusLost",        &m_PauseOnFocusLost,                            false);
 }
 
 void SConfig::LoadHotkeySettings(IniFile& ini)
@@ -453,21 +535,27 @@ void SConfig::LoadGameListSettings(IniFile& ini)
 {
 	IniFile::Section* gamelist = ini.GetOrCreateSection("GameList");
 
-	gamelist->Get("ListDrives",       &m_ListDrives,  false);
-	gamelist->Get("ListWad",          &m_ListWad,     true);
-	gamelist->Get("ListWii",          &m_ListWii,     true);
-	gamelist->Get("ListGC",           &m_ListGC,      true);
-	gamelist->Get("ListJap",          &m_ListJap,     true);
-	gamelist->Get("ListPal",          &m_ListPal,     true);
-	gamelist->Get("ListUsa",          &m_ListUsa,     true);
+	gamelist->Get("ListDrives",        &m_ListDrives,  false);
+	gamelist->Get("ListWad",           &m_ListWad,     true);
+	gamelist->Get("ListWii",           &m_ListWii,     true);
+	gamelist->Get("ListGC",            &m_ListGC,      true);
+	gamelist->Get("ListJap",           &m_ListJap,     true);
+	gamelist->Get("ListPal",           &m_ListPal,     true);
+	gamelist->Get("ListUsa",           &m_ListUsa,     true);
 
-	gamelist->Get("ListFrance",       &m_ListFrance,  true);
-	gamelist->Get("ListItaly",        &m_ListItaly,   true);
-	gamelist->Get("ListKorea",        &m_ListKorea,   true);
-	gamelist->Get("ListTaiwan",       &m_ListTaiwan,  true);
-	gamelist->Get("ListUnknown",      &m_ListUnknown, true);
-	gamelist->Get("ListSort",         &m_ListSort,       3);
-	gamelist->Get("ListSortSecondary",&m_ListSort2,  0);
+	gamelist->Get("ListAustralia",     &m_ListAustralia,     true);
+	gamelist->Get("ListFrance",        &m_ListFrance,        true);
+	gamelist->Get("ListGermany",       &m_ListGermany,       true);
+	gamelist->Get("ListItaly",         &m_ListItaly,         true);
+	gamelist->Get("ListKorea",         &m_ListKorea,         true);
+	gamelist->Get("ListNetherlands",   &m_ListNetherlands,   true);
+	gamelist->Get("ListRussia",        &m_ListRussia,        true);
+	gamelist->Get("ListSpain",         &m_ListSpain,         true);
+	gamelist->Get("ListTaiwan",        &m_ListTaiwan,        true);
+	gamelist->Get("ListWorld",         &m_ListWorld,         true);
+	gamelist->Get("ListUnknown",       &m_ListUnknown,       true);
+	gamelist->Get("ListSort",          &m_ListSort,       3);
+	gamelist->Get("ListSortSecondary", &m_ListSort2,      0);
 
 	// Determines if compressed games display in blue
 	gamelist->Get("ColorCompressed", &m_ColorCompressed, true);
@@ -475,7 +563,7 @@ void SConfig::LoadGameListSettings(IniFile& ini)
 	// Gamelist columns toggles
 	gamelist->Get("ColumnPlatform",   &m_showSystemColumn,  true);
 	gamelist->Get("ColumnBanner",     &m_showBannerColumn,  true);
-	gamelist->Get("ColumnNotes",      &m_showNotesColumn,   true);
+	gamelist->Get("ColumnNotes",      &m_showMakerColumn,   true);
 	gamelist->Get("ColumnID",         &m_showIDColumn,      false);
 	gamelist->Get("ColumnRegion",     &m_showRegionColumn,  true);
 	gamelist->Get("ColumnSize",       &m_showSizeColumn,    true);
@@ -488,18 +576,20 @@ void SConfig::LoadCoreSettings(IniFile& ini)
 
 	core->Get("HLE_BS2",      &m_LocalCoreStartupParameter.bHLE_BS2, false);
 #ifdef _M_X86
-	core->Get("CPUCore",      &m_LocalCoreStartupParameter.iCPUCore, 1);
+	core->Get("CPUCore",      &m_LocalCoreStartupParameter.iCPUCore, PowerPC::CORE_JIT64);
 #elif _M_ARM_32
-	core->Get("CPUCore",      &m_LocalCoreStartupParameter.iCPUCore, 3);
+	core->Get("CPUCore",      &m_LocalCoreStartupParameter.iCPUCore, PowerPC::CORE_JITARM);
+#elif _M_ARM_64
+	core->Get("CPUCore",      &m_LocalCoreStartupParameter.iCPUCore, PowerPC::CORE_JITARM64);
 #else
-	core->Get("CPUCore",      &m_LocalCoreStartupParameter.iCPUCore, 0);
+	core->Get("CPUCore",      &m_LocalCoreStartupParameter.iCPUCore, PowerPC::CORE_INTERPRETER);
 #endif
 	core->Get("Fastmem",           &m_LocalCoreStartupParameter.bFastmem,      true);
-	core->Get("DSPThread",         &m_LocalCoreStartupParameter.bDSPThread,    false);
 	core->Get("DSPHLE",            &m_LocalCoreStartupParameter.bDSPHLE,       true);
 	core->Get("CPUThread",         &m_LocalCoreStartupParameter.bCPUThread,    true);
 	core->Get("SkipIdle",          &m_LocalCoreStartupParameter.bSkipIdle,     true);
-	core->Get("DefaultGCM",        &m_LocalCoreStartupParameter.m_strDefaultGCM);
+	core->Get("SyncOnSkipIdle",    &m_LocalCoreStartupParameter.bSyncGPUOnSkipIdleHack, true);
+	core->Get("DefaultISO",        &m_LocalCoreStartupParameter.m_strDefaultISO);
 	core->Get("DVDRoot",           &m_LocalCoreStartupParameter.m_strDVDRoot);
 	core->Get("Apploader",         &m_LocalCoreStartupParameter.m_strApploader);
 	core->Get("EnableCheats",      &m_LocalCoreStartupParameter.bEnableCheats, false);
@@ -508,6 +598,8 @@ void SConfig::LoadCoreSettings(IniFile& ini)
 	core->Get("Latency",           &m_LocalCoreStartupParameter.iLatency, 2);
 	core->Get("MemcardAPath",      &m_strMemoryCardA);
 	core->Get("MemcardBPath",      &m_strMemoryCardB);
+	core->Get("AgpCartAPath",      &m_strGbaCartA);
+	core->Get("AgpCartBPath",      &m_strGbaCartB);
 	core->Get("SlotA",       (int*)&m_EXIDevice[0], EXIDEVICE_MEMORYCARD);
 	core->Get("SlotB",       (int*)&m_EXIDevice[1], EXIDEVICE_NONE);
 	core->Get("SerialPort1", (int*)&m_EXIDevice[2], EXIDEVICE_NONE);
@@ -521,19 +613,22 @@ void SConfig::LoadCoreSettings(IniFile& ini)
 	core->Get("WiiSDCard",                 &m_WiiSDCard,                                   false);
 	core->Get("WiiKeyboard",               &m_WiiKeyboard,                                 false);
 	core->Get("WiimoteContinuousScanning", &m_WiimoteContinuousScanning,                   false);
-	core->Get("WiimoteEnableSpeaker",      &m_WiimoteEnableSpeaker,                        true);
+	core->Get("WiimoteEnableSpeaker",      &m_WiimoteEnableSpeaker,                        false);
 	core->Get("RunCompareServer",          &m_LocalCoreStartupParameter.bRunCompareServer, false);
 	core->Get("RunCompareClient",          &m_LocalCoreStartupParameter.bRunCompareClient, false);
 	core->Get("MMU",                       &m_LocalCoreStartupParameter.bMMU,              false);
-	core->Get("TLBHack",                   &m_LocalCoreStartupParameter.bTLBHack,          false);
 	core->Get("BBDumpPort",                &m_LocalCoreStartupParameter.iBBDumpPort,       -1);
-	core->Get("VBeam",                     &m_LocalCoreStartupParameter.bVBeamSpeedHack,   false);
 	core->Get("SyncGPU",                   &m_LocalCoreStartupParameter.bSyncGPU,          false);
 	core->Get("FastDiscSpeed",             &m_LocalCoreStartupParameter.bFastDiscSpeed,    false);
 	core->Get("DCBZ",                      &m_LocalCoreStartupParameter.bDCBZOFF,          false);
 	core->Get("FrameLimit",                &m_Framelimit,                                  1); // auto frame limit by default
+	core->Get("Overclock",                 &m_OCFactor,                                    1.0f);
+	core->Get("OverclockEnable",           &m_OCEnable,                                    false);
 	core->Get("FrameSkip",                 &m_FrameSkip,                                   0);
 	core->Get("GFXBackend",                &m_LocalCoreStartupParameter.m_strVideoBackend, "");
+	core->Get("GPUDeterminismMode",        &m_LocalCoreStartupParameter.m_strGPUDeterminismMode, "auto");
+	core->Get("GameCubeAdapter",           &m_GameCubeAdapter,                             true);
+	core->Get("AdapterRumble",             &m_AdapterRumble,                               true);
 }
 
 void SConfig::LoadMovieSettings(IniFile& ini)
@@ -542,6 +637,9 @@ void SConfig::LoadMovieSettings(IniFile& ini)
 
 	movie->Get("PauseMovie", &m_PauseMovie, false);
 	movie->Get("Author", &m_strMovieAuthor, "");
+	movie->Get("DumpFrames", &m_DumpFrames, false);
+	movie->Get("DumpFramesSilent", &m_DumpFramesSilent, false);
+	movie->Get("ShowInputDisplay", &m_ShowInputDisplay, false);
 }
 
 void SConfig::LoadDSPSettings(IniFile& ini)
@@ -563,6 +661,8 @@ void SConfig::LoadDSPSettings(IniFile& ini)
 #endif
 	dsp->Get("Volume", &m_Volume, 100);
 	dsp->Get("CaptureLog", &m_DSPCaptureLog, false);
+
+	m_IsMuted = false;
 }
 
 void SConfig::LoadInputSettings(IniFile& ini)

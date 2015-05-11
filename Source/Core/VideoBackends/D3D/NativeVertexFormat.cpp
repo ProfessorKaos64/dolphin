@@ -4,6 +4,7 @@
 
 #include "VideoBackends/D3D/D3DBase.h"
 #include "VideoBackends/D3D/D3DBlob.h"
+#include "VideoBackends/D3D/D3DState.h"
 #include "VideoBackends/D3D/VertexManager.h"
 #include "VideoBackends/D3D/VertexShaderCache.h"
 #include "VideoCommon/NativeVertexFormat.h"
@@ -58,7 +59,7 @@ DXGI_FORMAT VarToD3D(VarType t, int size, bool integer)
 
 void D3DVertexFormat::Initialize(const PortableVertexDeclaration &_vtx_decl)
 {
-	vertex_stride = _vtx_decl.stride;
+	vtx_decl = _vtx_decl;
 	memset(m_elems, 0, sizeof(m_elems));
 	const AttributeFormat* format = &_vtx_decl.position;
 
@@ -137,7 +138,7 @@ void D3DVertexFormat::SetupVertexPointers()
 		if (FAILED(hr)) PanicAlert("Failed to create input layout, %s %d\n", __FILE__, __LINE__);
 		DX11::D3D::SetDebugObjectName((ID3D11DeviceChild*)m_layout, "input layout used to emulate the GX pipeline");
 	}
-	DX11::D3D::context->IASetInputLayout(m_layout);
+	DX11::D3D::stateman->SetInputLayout(m_layout);
 }
 
 } // namespace DX11

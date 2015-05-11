@@ -5,9 +5,10 @@
 #include <algorithm>
 #include <string>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 #include "Core/Core.h"
+#include "VideoBackends/OGL/GLInterfaceBase.h"
 #include "VideoBackends/OGL/GLUtil.h"
 #include "VideoBackends/Software/RasterFont.h"
 #include "VideoBackends/Software/SWCommandProcessor.h"
@@ -41,8 +42,8 @@ void SWRenderer::Init()
 
 void SWRenderer::Shutdown()
 {
-	delete [] s_xfbColorTexture[0];
-	delete [] s_xfbColorTexture[1];
+	delete[] s_xfbColorTexture[0];
+	delete[] s_xfbColorTexture[1];
 	glDeleteProgram(program);
 	glDeleteTextures(1, &s_RenderTarget);
 	if (GLInterface->GetMode() == GLInterfaceMode::MODE_OPENGL)
@@ -86,8 +87,8 @@ static void CreateShaders()
 
 void SWRenderer::Prepare()
 {
-	s_xfbColorTexture[0] = new u8[MAX_XFB_WIDTH*MAX_XFB_HEIGHT*4];
-	s_xfbColorTexture[1] = new u8[MAX_XFB_WIDTH*MAX_XFB_HEIGHT*4];
+	s_xfbColorTexture[0] = new u8[MAX_XFB_WIDTH * MAX_XFB_HEIGHT * 4];
+	s_xfbColorTexture[1] = new u8[MAX_XFB_WIDTH * MAX_XFB_HEIGHT * 4];
 
 	s_currentColorTexture = 0;
 
@@ -102,7 +103,6 @@ void SWRenderer::Prepare()
 		s_pfont = new RasterFont();
 		glEnable(GL_TEXTURE_2D);
 	}
-	GL_REPORT_ERRORD();
 }
 
 void SWRenderer::SetScreenshot(const char *_szFilename)
@@ -118,8 +118,8 @@ void SWRenderer::RenderText(const char* pstr, int left, int top, u32 color)
 		return;
 	int nBackbufferWidth = (int)GLInterface->GetBackBufferWidth();
 	int nBackbufferHeight = (int)GLInterface->GetBackBufferHeight();
-	glColor4f(((color>>16) & 0xff)/255.0f, ((color>> 8) & 0xff)/255.0f,
-			((color>> 0) & 0xff)/255.0f, ((color>>24) & 0xFF)/255.0f);
+	glColor4f(((color >> 16) & 0xff) / 255.0f, ((color >> 8) & 0xff) / 255.0f,
+			((color >> 0) & 0xff) / 255.0f, ((color >> 24) & 0xFF) / 255.0f);
 	s_pfont->printMultilineText(pstr,
 			left * 2.0f / (float)nBackbufferWidth - 1,
 			1 - top * 2.0f / (float)nBackbufferHeight,
@@ -152,27 +152,31 @@ void SWRenderer::DrawDebugText()
 	SWRenderer::RenderText(debugtext.c_str(), 20, 20, 0xFFFFFF00);
 }
 
-u8* SWRenderer::getNextColorTexture() {
+u8* SWRenderer::GetNextColorTexture()
+{
 	return s_xfbColorTexture[!s_currentColorTexture];
 }
 
-u8* SWRenderer::getCurrentColorTexture() {
+u8* SWRenderer::GetCurrentColorTexture()
+{
 	return s_xfbColorTexture[s_currentColorTexture];
 }
 
-void SWRenderer::swapColorTexture() {
+void SWRenderer::SwapColorTexture()
+{
 	s_currentColorTexture = !s_currentColorTexture;
 }
 
 void SWRenderer::UpdateColorTexture(EfbInterface::yuv422_packed *xfb, u32 fbWidth, u32 fbHeight)
 {
-	if (fbWidth*fbHeight > MAX_XFB_WIDTH*MAX_XFB_HEIGHT) {
+	if (fbWidth * fbHeight > MAX_XFB_WIDTH * MAX_XFB_HEIGHT)
+	{
 		ERROR_LOG(VIDEO, "Framebuffer is too large: %ix%i", fbWidth, fbHeight);
 		return;
 	}
 
 	u32 offset = 0;
-	u8 *TexturePointer = getNextColorTexture();
+	u8 *TexturePointer = GetNextColorTexture();
 
 	for (u16 y = 0; y < fbHeight; y++)
 	{
@@ -180,9 +184,9 @@ void SWRenderer::UpdateColorTexture(EfbInterface::yuv422_packed *xfb, u32 fbWidt
 		{
 			// We do this one color sample (aka 2 RGB pixles) at a time
 			int Y1 = xfb[x].Y - 16;
-			int Y2 = xfb[x+1].Y - 16;
+			int Y2 = xfb[x + 1].Y - 16;
 			int U  = int(xfb[x].UV) - 128;
-			int V  = int(xfb[x+1].UV) - 128;
+			int V  = int(xfb[x + 1].UV) - 128;
 
 			// We do the inverse BT.601 conversion for YCbCr to RGB
 			// http://www.equasys.de/colorconversion.html#YCbCr-RGBColorFormatConversion
@@ -198,7 +202,7 @@ void SWRenderer::UpdateColorTexture(EfbInterface::yuv422_packed *xfb, u32 fbWidt
 		}
 		xfb += fbWidth;
 	}
-	swapColorTexture();
+	SwapColorTexture();
 }
 
 // Called on the GPU thread
@@ -206,7 +210,7 @@ void SWRenderer::Swap(u32 fbWidth, u32 fbHeight)
 {
 	GLInterface->Update(); // just updates the render window position and the backbuffer size
 	if (!g_SWVideoConfig.bHwRasterizer)
-		SWRenderer::DrawTexture(getCurrentColorTexture(), fbWidth, fbHeight);
+		SWRenderer::DrawTexture(GetCurrentColorTexture(), fbWidth, fbHeight);
 
 	swstats.frameCount++;
 	SWRenderer::SwapBuffer();
@@ -221,7 +225,7 @@ void SWRenderer::DrawTexture(u8 *texture, int width, int height)
 	if (s_bScreenshot)
 	{
 		std::lock_guard<std::mutex> lk(s_criticalScreenshot);
-		TextureToPng(texture, width*4, s_sScreenshotName, width, height, false);
+		TextureToPng(texture, width * 4, s_sScreenshotName, width, height, false);
 		// Reset settings
 		s_sScreenshotName.clear();
 		s_bScreenshot = false;
@@ -266,7 +270,6 @@ void SWRenderer::DrawTexture(u8 *texture, int width, int height)
 	glDisableVertexAttribArray(attr_tex);
 
 	glBindTexture(GL_TEXTURE_2D, 0);
-	GL_REPORT_ERRORD();
 }
 
 void SWRenderer::SwapBuffer()
@@ -283,6 +286,4 @@ void SWRenderer::SwapBuffer()
 	swstats.ResetFrame();
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-	GL_REPORT_ERRORD();
 }

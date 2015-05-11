@@ -2,6 +2,7 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
+#include "Core/HW/WiimoteEmu/WiimoteEmu.h"
 #include "Core/HW/WiimoteEmu/Attachment/Classic.h"
 
 namespace WiimoteEmu
@@ -60,8 +61,8 @@ Classic::Classic(WiimoteEmu::ExtensionReg& _reg) : Attachment(_trans("Classic"),
 		m_buttons->controls.emplace_back(new ControlGroup::Input(classic_button_name));
 
 	// sticks
-	groups.emplace_back(m_left_stick = new AnalogStick(_trans("Left Stick")));
-	groups.emplace_back(m_right_stick = new AnalogStick(_trans("Right Stick")));
+	groups.emplace_back(m_left_stick = new AnalogStick(_trans("Left Stick"), DEFAULT_ATTACHMENT_STICK_RADIUS));
+	groups.emplace_back(m_right_stick = new AnalogStick(_trans("Right Stick"), DEFAULT_ATTACHMENT_STICK_RADIUS));
 
 	// triggers
 	groups.emplace_back(m_triggers = new MixedTriggers("Triggers"));
@@ -83,27 +84,27 @@ Classic::Classic(WiimoteEmu::ExtensionReg& _reg) : Attachment(_trans("Classic"),
 void Classic::GetState(u8* const data)
 {
 	wm_classic_extension* const ccdata = (wm_classic_extension*)data;
-	ccdata->bt = 0;
+	ccdata->bt.hex = 0;
 
 	// not using calibration data, o well
 
 	// left stick
 	{
-	double x, y;
+	ControlState x, y;
 	m_left_stick->GetState(&x, &y);
 
-	ccdata->lx = Classic::LEFT_STICK_CENTER_X + (x * Classic::LEFT_STICK_RADIUS);
-	ccdata->ly = Classic::LEFT_STICK_CENTER_Y + (y * Classic::LEFT_STICK_RADIUS);
+	ccdata->regular_data.lx = static_cast<u8>(Classic::LEFT_STICK_CENTER_X + (x * Classic::LEFT_STICK_RADIUS));
+	ccdata->regular_data.ly = static_cast<u8>(Classic::LEFT_STICK_CENTER_Y + (y * Classic::LEFT_STICK_RADIUS));
 	}
 
 	// right stick
 	{
-	double x, y;
+	ControlState x, y;
 	u8 x_, y_;
 	m_right_stick->GetState(&x, &y);
 
-	x_ = Classic::RIGHT_STICK_CENTER_X + (x * Classic::RIGHT_STICK_RADIUS);
-	y_ = Classic::RIGHT_STICK_CENTER_Y + (y * Classic::RIGHT_STICK_RADIUS);
+	x_ = static_cast<u8>(Classic::RIGHT_STICK_CENTER_X + (x * Classic::RIGHT_STICK_RADIUS));
+	y_ = static_cast<u8>(Classic::RIGHT_STICK_CENTER_Y + (y * Classic::RIGHT_STICK_RADIUS));
 
 	ccdata->rx1 = x_;
 	ccdata->rx2 = x_ >> 1;
@@ -113,12 +114,12 @@ void Classic::GetState(u8* const data)
 
 	//triggers
 	{
-	double trigs[2] = { 0, 0 };
+	ControlState trigs[2] = { 0, 0 };
 	u8 lt, rt;
-	m_triggers->GetState(&ccdata->bt, classic_trigger_bitmasks, trigs);
+	m_triggers->GetState(&ccdata->bt.hex, classic_trigger_bitmasks, trigs);
 
-	lt = trigs[0] * Classic::LEFT_TRIGGER_RANGE;
-	rt = trigs[1] * Classic::RIGHT_TRIGGER_RANGE;
+	lt = static_cast<u8>(trigs[0] * Classic::LEFT_TRIGGER_RANGE);
+	rt = static_cast<u8>(trigs[1] * Classic::RIGHT_TRIGGER_RANGE);
 
 	ccdata->lt1 = lt;
 	ccdata->lt2 = lt >> 3;
@@ -126,12 +127,12 @@ void Classic::GetState(u8* const data)
 	}
 
 	// buttons
-	m_buttons->GetState(&ccdata->bt, classic_button_bitmasks);
+	m_buttons->GetState(&ccdata->bt.hex, classic_button_bitmasks);
 	// dpad
-	m_dpad->GetState(&ccdata->bt, classic_dpad_bitmasks);
+	m_dpad->GetState(&ccdata->bt.hex, classic_dpad_bitmasks);
 
 	// flip button bits
-	ccdata->bt ^= 0xFFFF;
+	ccdata->bt.hex ^= 0xFFFF;
 }
 
 

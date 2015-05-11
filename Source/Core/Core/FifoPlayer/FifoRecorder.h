@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "Core/FifoPlayer/FifoDataFile.h"
 #include "Core/FifoPlayer/FifoRecordAnalyzer.h"
 
@@ -34,7 +36,7 @@ public:
 	void SetVideoMemory(u32 *bpMem, u32 *cpMem, u32 *xfMem, u32 *xfRegs, u32 xfRegsSize);
 
 	// Checked once per frame prior to callng EndFrame()
-	bool IsRecording() { return m_IsRecording; }
+	bool IsRecording() const { return m_IsRecording; }
 
 	static FifoRecorder &GetInstance();
 
@@ -58,7 +60,7 @@ private:
 	bool m_FrameEnded;
 	FifoFrameInfo m_CurrentFrame;
 	std::vector<u8> m_FifoData;
-	u8 *m_Ram;
-	u8 *m_ExRam;
+	std::vector<u8> m_Ram;
+	std::vector<u8> m_ExRam;
 	FifoRecordAnalyzer m_RecordAnalyzer;
 };

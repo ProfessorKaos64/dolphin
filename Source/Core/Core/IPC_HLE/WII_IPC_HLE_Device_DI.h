@@ -4,13 +4,11 @@
 
 #pragma once
 
+#include <deque>
 #include "Core/IPC_HLE/WII_IPC_HLE_Device.h"
 
-namespace DiscIO
-{
-	class IVolume;
-	class IFileSystem;
-}
+class PointerWrap;
+namespace DVDInterface { enum DIInterruptType : int; }
 
 class CWII_IPC_HLE_Device_di : public IWII_IPC_HLE_Device
 {
@@ -20,20 +18,18 @@ public:
 
 	virtual ~CWII_IPC_HLE_Device_di();
 
-	bool Open(u32 _CommandAddress, u32 _Mode) override;
-	bool Close(u32 _CommandAddress, bool _bForce) override;
+	void DoState(PointerWrap& p) override;
 
-	bool IOCtl(u32 _CommandAddress) override;
-	bool IOCtlV(u32 _CommandAddress) override;
+	IPCCommandResult Open(u32 _CommandAddress, u32 _Mode) override;
+	IPCCommandResult Close(u32 _CommandAddress, bool _bForce) override;
 
-	int GetCmdDelay(u32) override;
+	IPCCommandResult IOCtl(u32 _CommandAddress) override;
+	IPCCommandResult IOCtlV(u32 _CommandAddress) override;
 
+	void FinishIOCtl(DVDInterface::DIInterruptType interrupt_type);
 private:
 
-	u32 ExecuteCommand(u32 BufferIn, u32 BufferInSize, u32 _BufferOut, u32 BufferOutSize);
+	void StartIOCtl(u32 command_address);
 
-	DiscIO::IFileSystem* m_pFileSystem;
-	u32 m_ErrorStatus;
-	// This flag seems to only be reset with poweron/off, not sure
-	u32 m_CoverStatus;
+	std::deque<u32> m_commands_to_execute;
 };

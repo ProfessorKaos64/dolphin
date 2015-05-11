@@ -5,15 +5,9 @@
 #pragma once
 
 #include <wx/app.h>
-#include <wx/chartype.h>
-#include <wx/defs.h>
-#include <wx/event.h>
-#include <wx/string.h>
 
 class CFrame;
 class wxLocale;
-class wxTimer;
-class wxTimerEvent;
 
 extern CFrame* main_frame;
 
@@ -31,9 +25,6 @@ private:
 	void InitLanguageSupport();
 	void MacOpenFile(const wxString &fileName);
 
-	DECLARE_EVENT_TABLE()
-
-	wxTimer *m_afterinit;
 	bool BatchMode;
 	bool LoadFile;
 	bool playMovie;
@@ -41,7 +32,7 @@ private:
 	wxString movieFile;
 	wxLocale *m_locale;
 
-	void AfterInit(wxTimerEvent& WXUNUSED(event));
+	void AfterInit();
 	void OnEndSession(wxCloseEvent& event);
 };
 

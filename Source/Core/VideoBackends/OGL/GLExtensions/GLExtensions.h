@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "DolphinWX/GLInterface/GLInterface.h"
+#include "Common/CommonTypes.h"
 
 #include "VideoBackends/OGL/GLExtensions/ARB_blend_func_extended.h"
 #include "VideoBackends/OGL/GLExtensions/ARB_buffer_storage.h"
@@ -31,6 +31,7 @@
 #include "VideoBackends/OGL/GLExtensions/gl_3_1.h"
 #include "VideoBackends/OGL/GLExtensions/gl_3_2.h"
 #include "VideoBackends/OGL/GLExtensions/KHR_debug.h"
+#include "VideoBackends/OGL/GLExtensions/NV_occlusion_query_samples.h"
 #include "VideoBackends/OGL/GLExtensions/NV_primitive_restart.h"
 
 namespace GLExtensions

@@ -28,9 +28,9 @@
 static u32 state_checksum(u32 *buf, int len)
 {
 	u32 checksum = 0;
-	len = len>>2;
+	len = len >> 2;
 
-	for (int i=0; i<len; i++)
+	for (int i = 0; i < len; i++)
 	{
 		checksum += buf[i];
 	}
@@ -38,14 +38,15 @@ static u32 state_checksum(u32 *buf, int len)
 	return checksum;
 }
 
-typedef struct {
+struct StateFlags
+{
 	u32 checksum;
 	u8 flags;
 	u8 type;
 	u8 discstate;
 	u8 returnto;
 	u32 unknown[6];
-} StateFlags;
+};
 
 bool CBoot::Boot_WiiWAD(const std::string& _pFilename)
 {
@@ -58,7 +59,7 @@ bool CBoot::Boot_WiiWAD(const std::string& _pFilename)
 		state_file.ReadBytes(&state, sizeof(StateFlags));
 
 		state.type = 0x03; // TYPE_RETURN
-		state.checksum = state_checksum((u32*)&state.flags, sizeof(StateFlags)-4);
+		state.checksum = state_checksum((u32*)&state.flags, sizeof(StateFlags) - 4);
 
 		state_file.Seek(0, SEEK_SET);
 		state_file.WriteBytes(&state, sizeof(StateFlags));
@@ -68,10 +69,10 @@ bool CBoot::Boot_WiiWAD(const std::string& _pFilename)
 		File::CreateFullPath(state_filename);
 		File::IOFile state_file(state_filename, "a+b");
 		StateFlags state;
-		memset(&state,0,sizeof(StateFlags));
+		memset(&state, 0, sizeof(StateFlags));
 		state.type = 0x03; // TYPE_RETURN
 		state.discstate = 0x01; // DISCSTATE_WII
-		state.checksum = state_checksum((u32*)&state.flags, sizeof(StateFlags)-4);
+		state.checksum = state_checksum((u32*)&state.flags, sizeof(StateFlags) - 4);
 		state_file.WriteBytes(&state, sizeof(StateFlags));
 	}
 
@@ -85,7 +86,7 @@ bool CBoot::Boot_WiiWAD(const std::string& _pFilename)
 
 	if (titleID == TITLEID_SYSMENU)
 		HLE_IPC_CreateVirtualFATFilesystem();
-	// setup wii mem
+	// setup Wii memory
 	if (!SetupWiiMemory(ContentLoader.GetCountry()))
 		return false;
 
@@ -106,7 +107,7 @@ bool CBoot::Boot_WiiWAD(const std::string& _pFilename)
 		pDolLoader = std::make_unique<CDolLoader>(pContent->m_Filename);
 	}
 	pDolLoader->Load();
-	PC = pDolLoader->GetEntryPoint() | 0x80000000;
+	PC = pDolLoader->GetEntryPoint();
 
 	// Pass the "#002 check"
 	// Apploader should write the IOS version and revision to 0x3140, and compare it
@@ -119,7 +120,7 @@ bool CBoot::Boot_WiiWAD(const std::string& _pFilename)
 	Memory::Write_U32(Memory::Read_U32(0x00003140), 0x00003188);
 
 	// Load patches and run startup patches
-	const DiscIO::IVolume* pVolume = DiscIO::CreateVolumeFromFilename(_pFilename);
+	const std::unique_ptr<DiscIO::IVolume> pVolume(DiscIO::CreateVolumeFromFilename(_pFilename));
 	if (pVolume != nullptr)
 		PatchEngine::LoadPatches();
 

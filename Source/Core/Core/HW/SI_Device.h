@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 class PointerWrap;
 
@@ -38,7 +38,7 @@ enum TSIDevices
 };
 
 // For configuration use, since some devices can have the same SI Device ID
-enum SIDevices
+enum SIDevices : int
 {
 	SIDEVICE_NONE,
 	SIDEVICE_N64_MIC,
@@ -73,6 +73,7 @@ public:
 
 	// Run the SI Buffer
 	virtual int RunBuffer(u8* _pBuffer, int _iLength);
+	virtual int TransferInterval();
 
 	// Return true on new data
 	virtual bool GetData(u32& _Hi, u32& _Low) = 0;
@@ -84,12 +85,12 @@ public:
 	virtual void DoState(PointerWrap& p) {}
 
 
-	int GetDeviceNumber()
+	int GetDeviceNumber() const
 	{
 		return m_iDeviceNumber;
 	}
 
-	SIDevices GetDeviceType()
+	SIDevices GetDeviceType() const
 	{
 		return m_deviceType;
 	}

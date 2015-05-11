@@ -2,20 +2,24 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
+#include <mutex>
+#include <thread>
+
 #include "Common/Atomic.h"
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/CPUDetect.h"
 #include "Common/Event.h"
 #include "Common/IniFile.h"
-#include "Common/StdMutex.h"
-#include "Common/StdThread.h"
+#include "Common/Thread.h"
 #include "Common/Logging/LogManager.h"
 
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/Host.h"
+#include "Core/Movie.h"
+#include "Core/NetPlayProto.h"
 #include "Core/DSP/DSPCaptureLogger.h"
 #include "Core/DSP/DSPCore.h"
 #include "Core/DSP/DSPDisassembler.h"
@@ -30,21 +34,25 @@
 #include "Core/HW/DSPLLE/DSPLLEGlobals.h"
 #include "Core/HW/DSPLLE/DSPSymbols.h"
 
-
 DSPLLE::DSPLLE()
+	: m_hDSPThread()
+	, m_csDSPThreadActive()
+	, m_bWii(false)
+	, m_bDSPThread(false)
+	, m_bIsRunning(false)
+	, m_cycle_count(0)
 {
-	m_bIsRunning = false;
-	m_cycle_count = 0;
 }
 
 static Common::Event dspEvent;
 static Common::Event ppcEvent;
+static bool requestDisableThread;
 
 void DSPLLE::DoState(PointerWrap &p)
 {
-	bool isHLE = false;
-	p.Do(isHLE);
-	if (isHLE != false && p.GetMode() == PointerWrap::MODE_READ)
+	bool is_hle = false;
+	p.Do(is_hle);
+	if (is_hle && p.GetMode() == PointerWrap::MODE_READ)
 	{
 		Core::DisplayMessage("State is incompatible with current DSP engine. Aborting load state.", 3000);
 		p.SetMode(PointerWrap::MODE_VERIFY);
@@ -81,16 +89,16 @@ void DSPLLE::DoState(PointerWrap &p)
 }
 
 // Regular thread
-void DSPLLE::dsp_thread(DSPLLE *dsp_lle)
+void DSPLLE::DSPThread(DSPLLE* dsp_lle)
 {
 	Common::SetCurrentThreadName("DSP thread");
 
-	while (dsp_lle->m_bIsRunning)
+	while (dsp_lle->m_bIsRunning.IsSet())
 	{
-		int cycles = (int)dsp_lle->m_cycle_count;
+		const int cycles = static_cast<int>(dsp_lle->m_cycle_count.load());
 		if (cycles > 0)
 		{
-			std::lock_guard<std::mutex> lk(dsp_lle->m_csDSPThreadActive);
+			std::lock_guard<std::mutex> dsp_thread_lock(dsp_lle->m_csDSPThreadActive);
 			if (dspjit)
 			{
 				DSPCore_RunCycles(cycles);
@@ -99,7 +107,7 @@ void DSPLLE::dsp_thread(DSPLLE *dsp_lle)
 			{
 				DSPInterpreter::RunCyclesThread(cycles);
 			}
-			Common::AtomicStore(dsp_lle->m_cycle_count, 0);
+			dsp_lle->m_cycle_count.store(0);
 		}
 		else
 		{
@@ -158,8 +166,7 @@ static bool FillDSPInitOptions(DSPInitOptions* opts)
 
 bool DSPLLE::Initialize(bool bWii, bool bDSPThread)
 {
-	m_bWii = bWii;
-	m_bDSPThread = bDSPThread;
+	requestDisableThread = false;
 
 	DSPInitOptions opts;
 	if (!FillDSPInitOptions(&opts))
@@ -167,27 +174,38 @@ bool DSPLLE::Initialize(bool bWii, bool bDSPThread)
 	if (!DSPCore_Init(opts))
 		return false;
 
-	g_dsp.cpu_ram = Memory::GetPointer(0);
-	DSPCore_Reset();
+	// needs to be after DSPCore_Init for the dspjit ptr
+	if (NetPlay::IsNetPlayRunning() || Movie::IsMovieActive() ||
+	    Core::g_want_determinism    || !dspjit)
+	{
+		bDSPThread = false;
+	}
+	m_bWii = bWii;
+	m_bDSPThread = bDSPThread;
 
-	m_bIsRunning = true;
+	// DSPLLE directly accesses the fastmem arena.
+	// TODO: The fastmem arena is only supposed to be used by the JIT:
+	// among other issues, its size is only 1GB on 32-bit targets.
+	g_dsp.cpu_ram = Memory::physical_base;
+	DSPCore_Reset();
 
 	InitInstructionTable();
 
-	if (m_bDSPThread)
-		m_hDSPThread = std::thread(dsp_thread, this);
+	if (bDSPThread)
+	{
+		m_bIsRunning.Set(true);
+		m_hDSPThread = std::thread(DSPThread, this);
+	}
 
 	Host_RefreshDSPDebuggerWindow();
-
 	return true;
 }
 
 void DSPLLE::DSP_StopSoundStream()
 {
-	DSPInterpreter::Stop();
-	m_bIsRunning = false;
 	if (m_bDSPThread)
 	{
+		m_bIsRunning.Clear();
 		ppcEvent.Set();
 		dspEvent.Set();
 		m_hDSPThread.join();
@@ -203,8 +221,6 @@ u16 DSPLLE::DSP_WriteControlRegister(u16 _uFlag)
 {
 	DSPInterpreter::WriteCR(_uFlag);
 
-	// Check if the CPU has set an external interrupt (CR_EXTERNAL_INT)
-	// and immediately process it, if it has.
 	if (_uFlag & 2)
 	{
 		if (!m_bDSPThread)
@@ -214,6 +230,10 @@ u16 DSPLLE::DSP_WriteControlRegister(u16 _uFlag)
 		}
 		else
 		{
+			// External interrupt pending: this is the zelda ucode.
+			// Disable the DSP thread because there is no performance gain.
+			requestDisableThread = true;
+
 			DSPCore_SetExternalInterrupt(true);
 		}
 
@@ -229,18 +249,12 @@ u16 DSPLLE::DSP_ReadControlRegister()
 
 u16 DSPLLE::DSP_ReadMailBoxHigh(bool _CPUMailbox)
 {
-	if (_CPUMailbox)
-		return gdsp_mbox_read_h(GDSP_MBOX_CPU);
-	else
-		return gdsp_mbox_read_h(GDSP_MBOX_DSP);
+	return gdsp_mbox_read_h(_CPUMailbox ? GDSP_MBOX_CPU : GDSP_MBOX_DSP);
 }
 
 u16 DSPLLE::DSP_ReadMailBoxLow(bool _CPUMailbox)
 {
-	if (_CPUMailbox)
-		return gdsp_mbox_read_l(GDSP_MBOX_CPU);
-	else
-		return gdsp_mbox_read_l(GDSP_MBOX_DSP);
+	return gdsp_mbox_read_l(_CPUMailbox ? GDSP_MBOX_CPU : GDSP_MBOX_DSP);
 }
 
 void DSPLLE::DSP_WriteMailBoxHigh(bool _CPUMailbox, u16 _uHighMail)
@@ -303,6 +317,17 @@ void DSPLLE::DSP_Update(int cycles)
 		soundStream->Update();
 	}
 */
+	if (m_bDSPThread)
+	{
+		if (requestDisableThread || NetPlay::IsNetPlayRunning() || Movie::IsMovieActive() || Core::g_want_determinism)
+		{
+			DSP_StopSoundStream();
+			m_bDSPThread = false;
+			requestDisableThread = false;
+			SConfig::GetInstance().m_LocalCoreStartupParameter.bDSPThread = false;
+		}
+	}
+
 	// If we're not on a thread, run cycles here.
 	if (!m_bDSPThread)
 	{
@@ -311,11 +336,10 @@ void DSPLLE::DSP_Update(int cycles)
 	}
 	else
 	{
-		// Wait for dsp thread to complete its cycle. Note: this logic should be thought through.
+		// Wait for DSP thread to complete its cycle. Note: this logic should be thought through.
 		ppcEvent.Wait();
-		Common::AtomicStore(m_cycle_count, dsp_cycles);
+		m_cycle_count.fetch_add(dsp_cycles);
 		dspEvent.Set();
-
 	}
 }
 
@@ -331,4 +355,3 @@ void DSPLLE::PauseAndLock(bool doLock, bool unpauseOnUnlock)
 	else
 		m_csDSPThreadActive.unlock();
 }
-

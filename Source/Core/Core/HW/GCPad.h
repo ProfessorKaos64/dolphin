@@ -2,23 +2,25 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#include "Common/CommonTypes.h"
-#include "InputCommon/GCPadStatus.h"
-#include "InputCommon/InputConfig.h"
-
 #pragma once
+
+#include "Common/CommonTypes.h"
+#include "InputCommon/ControllerInterface/Device.h"
+
+class InputConfig;
+struct GCPadStatus;
 
 namespace Pad
 {
 
 void Shutdown();
 void Initialize(void* const hwnd);
+void LoadConfig();
 
-InputPlugin *GetPlugin();
+InputConfig* GetConfig();
 
 void GetStatus(u8 _numPAD, GCPadStatus* _pPADStatus);
-void Rumble(u8 _numPAD, unsigned int _uType, unsigned int _uStrength);
-void Motor(u8 _numPAD, unsigned int _uType, unsigned int _uStrength);
+void Rumble(u8 _numPAD, const ControlState strength);
 
 bool GetMicButton(u8 pad);
 }

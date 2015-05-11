@@ -9,6 +9,9 @@
 #endif
 
 #include "Common/Thread.h"
+#include "Core/HW/EXI_Device.h"
+
+class PointerWrap;
 
 // Network Control Register A
 enum NCRA
@@ -155,7 +158,10 @@ enum
 	BBA_MEM_SIZE  = BBA_NUM_PAGES * BBA_PAGE_SIZE
 };
 
-enum { EXI_DEVTYPE_ETHER = 0x04020200 };
+enum
+{
+	EXI_DEVTYPE_ETHER = 0x04020200
+};
 
 enum SendStatus
 {
@@ -189,7 +195,7 @@ public:
 	CEXIETHERNET();
 	virtual ~CEXIETHERNET();
 	void SetCS(int cs) override;
-	bool IsPresent() override;
+	bool IsPresent() const override;
 	bool IsInterruptSet() override;
 	void ImmWrite(u32 data,  u32 size) override;
 	u32  ImmRead(u32 size) override;

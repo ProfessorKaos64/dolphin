@@ -2,6 +2,7 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
+#include "Common/ChunkFile.h"
 #include "Core/ConfigManager.h"
 #include "Core/CoreTiming.h"
 #include "Core/Movie.h"
@@ -12,9 +13,12 @@
 #include "Core/HW/ProcessorInterface.h"
 #include "Core/PowerPC/PowerPC.h"
 
-#define EXI_READ      0
-#define EXI_WRITE     1
-#define EXI_READWRITE 2
+enum
+{
+	EXI_READ,
+	EXI_WRITE,
+	EXI_READWRITE
+};
 
 CEXIChannel::CEXIChannel(u32 ChannelId) :
 	m_DMAMemoryAddress(0),
@@ -32,8 +36,6 @@ CEXIChannel::CEXIChannel(u32 ChannelId) :
 
 	for (auto& device : m_pDevices)
 		device.reset(EXIDevice_Create(EXIDEVICE_NONE, m_ChannelId));
-
-	updateInterrupts = CoreTiming::RegisterEvent("EXIInterrupt", UpdateInterrupts);
 }
 
 CEXIChannel::~CEXIChannel()
@@ -90,7 +92,7 @@ void CEXIChannel::RegisterMMIO(MMIO::Mapping* mmio, u32 base)
 			if (pDevice != nullptr)
 				pDevice->SetCS(m_Status.CHIP_SELECT);
 
-			CoreTiming::ScheduleEvent_Threadsafe_Immediate(updateInterrupts, 0);
+			ExpansionInterface::UpdateInterrupts();
 		})
 	);
 
@@ -153,13 +155,13 @@ void CEXIChannel::RegisterMMIO(MMIO::Mapping* mmio, u32 base)
 void CEXIChannel::SendTransferComplete()
 {
 	m_Status.TCINT = 1;
-	CoreTiming::ScheduleEvent_Threadsafe_Immediate(updateInterrupts, 0);
+	ExpansionInterface::UpdateInterrupts();
 }
 
 void CEXIChannel::RemoveDevices()
 {
 	for (auto& device : m_pDevices)
-		device.reset();
+		device.reset(nullptr);
 }
 
 void CEXIChannel::AddDevice(const TEXIDevices device_type, const int device_num)
@@ -182,14 +184,9 @@ void CEXIChannel::AddDevice(IEXIDevice* pDevice, const int device_num, bool noti
 		if (m_ChannelId != 2)
 		{
 			m_Status.EXTINT = 1;
-			CoreTiming::ScheduleEvent_Threadsafe_Immediate(updateInterrupts, 0);
+			ExpansionInterface::UpdateInterrupts();
 		}
 	}
-}
-
-void CEXIChannel::UpdateInterrupts(u64 userdata, int cyclesLate)
-{
-	ExpansionInterface::UpdateInterrupts();
 }
 
 bool CEXIChannel::IsCausingInterrupt()

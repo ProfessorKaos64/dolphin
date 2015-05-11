@@ -2,7 +2,7 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #include "Core/HW/ProcessorInterface.h"
 #include "Core/HW/SystemTimers.h"
@@ -11,31 +11,28 @@
 
 using namespace Gen;
 
-void Jit64::GetCRFieldBit(int field, int bit, Gen::X64Reg out)
+void Jit64::GetCRFieldBit(int field, int bit, Gen::X64Reg out, bool negate)
 {
 	switch (bit)
 	{
 	case CR_SO_BIT:  // check bit 61 set
-		MOV(64, R(ABI_PARAM1), Imm64(1ull << 61));
-		TEST(64, M(&PowerPC::ppcState.cr_val[field]), R(ABI_PARAM1));
-		SETcc(CC_NZ, R(out));
+		BT(64, PPCSTATE(cr_val[field]), Imm8(61));
+		SETcc(negate ? CC_NC : CC_C, R(out));
 		break;
 
 	case CR_EQ_BIT:  // check bits 31-0 == 0
-		CMP(32, M(&PowerPC::ppcState.cr_val[field]), Imm32(0));
-		SETcc(CC_Z, R(out));
+		CMP(32, PPCSTATE(cr_val[field]), Imm8(0));
+		SETcc(negate ? CC_NZ : CC_Z, R(out));
 		break;
 
 	case CR_GT_BIT:  // check val > 0
-		MOV(64, R(ABI_PARAM1), M(&PowerPC::ppcState.cr_val[field]));
-		TEST(64, R(ABI_PARAM1), R(ABI_PARAM1));
-		SETcc(CC_G, R(out));
+		CMP(64, PPCSTATE(cr_val[field]), Imm8(0));
+		SETcc(negate ? CC_NG : CC_G, R(out));
 		break;
 
 	case CR_LT_BIT:  // check bit 62 set
-		MOV(64, R(ABI_PARAM1), Imm64(1ull << 62));
-		TEST(64, M(&PowerPC::ppcState.cr_val[field]), R(ABI_PARAM1));
-		SETcc(CC_NZ, R(out));
+		BT(64, PPCSTATE(cr_val[field]), Imm8(62));
+		SETcc(negate ? CC_NC : CC_C, R(out));
 		break;
 
 	default:
@@ -45,63 +42,109 @@ void Jit64::GetCRFieldBit(int field, int bit, Gen::X64Reg out)
 
 void Jit64::SetCRFieldBit(int field, int bit, Gen::X64Reg in)
 {
-	MOV(64, R(ABI_PARAM2), M(&PowerPC::ppcState.cr_val[field]));
-	TEST(8, R(in), Imm8(1));
-	FixupBranch input_is_set = J_CC(CC_NZ, false);
+	MOV(64, R(RSCRATCH2), PPCSTATE(cr_val[field]));
+	MOVZX(32, 8, in, R(in));
 
-	// New value is 0.
-	switch (bit)
+	// Gross but necessary; if the input is totally zero and we set SO or LT,
+	// or even just add the (1<<32), GT will suddenly end up set without us
+	// intending to. This can break actual games, so fix it up.
+	if (bit != CR_GT_BIT)
 	{
-	case CR_SO_BIT:  // unset bit 61
-		MOV(64, R(ABI_PARAM1), Imm64(~(1ull << 61)));
-		AND(64, R(ABI_PARAM2), R(ABI_PARAM1));
-		break;
-
-	case CR_EQ_BIT:  // set bit 0 to 1
-		OR(8, R(ABI_PARAM2), Imm8(1));
-		break;
-
-	case CR_GT_BIT:  // !GT, set bit 63
-		MOV(64, R(ABI_PARAM1), Imm64(1ull << 63));
-		OR(64, R(ABI_PARAM2), R(ABI_PARAM1));
-		break;
-
-	case CR_LT_BIT:  // !LT, unset bit 62
-		MOV(64, R(ABI_PARAM1), Imm64(~(1ull << 62)));
-		AND(64, R(ABI_PARAM2), R(ABI_PARAM1));
-		break;
+		TEST(64, R(RSCRATCH2), R(RSCRATCH2));
+		FixupBranch dont_clear_gt = J_CC(CC_NZ);
+		BTS(64, R(RSCRATCH2), Imm8(63));
+		SetJumpTarget(dont_clear_gt);
 	}
-
-	FixupBranch end = J();
-	SetJumpTarget(input_is_set);
 
 	switch (bit)
 	{
-	case CR_SO_BIT:  // set bit 61
-		MOV(64, R(ABI_PARAM1), Imm64(1ull << 61));
-		OR(64, R(ABI_PARAM2), R(ABI_PARAM1));
+	case CR_SO_BIT:  // set bit 61 to input
+		BTR(64, R(RSCRATCH2), Imm8(61));
+		SHL(64, R(in), Imm8(61));
+		OR(64, R(RSCRATCH2), R(in));
 		break;
 
-	case CR_EQ_BIT:  // set bits 31-0 to 0
-		MOV(64, R(ABI_PARAM1), Imm64(0xFFFFFFFF00000000));
-		AND(64, R(ABI_PARAM2), R(ABI_PARAM1));
+	case CR_EQ_BIT:  // clear low 32 bits, set bit 0 to !input
+		SHR(64, R(RSCRATCH2), Imm8(32));
+		SHL(64, R(RSCRATCH2), Imm8(32));
+		XOR(32, R(in), Imm8(1));
+		OR(64, R(RSCRATCH2), R(in));
 		break;
 
-	case CR_GT_BIT:  // unset bit 63
-		MOV(64, R(ABI_PARAM1), Imm64(~(1ull << 63)));
-		AND(64, R(ABI_PARAM2), R(ABI_PARAM1));
+	case CR_GT_BIT:  // set bit 63 to !input
+		BTR(64, R(RSCRATCH2), Imm8(63));
+		NOT(32, R(in));
+		SHL(64, R(in), Imm8(63));
+		OR(64, R(RSCRATCH2), R(in));
 		break;
 
-	case CR_LT_BIT:  // set bit 62
-		MOV(64, R(ABI_PARAM1), Imm64(1ull << 62));
-		OR(64, R(ABI_PARAM2), R(ABI_PARAM1));
+	case CR_LT_BIT:  // set bit 62 to input
+		BTR(64, R(RSCRATCH2), Imm8(62));
+		SHL(64, R(in), Imm8(62));
+		OR(64, R(RSCRATCH2), R(in));
 		break;
 	}
 
-	SetJumpTarget(end);
-	MOV(64, R(ABI_PARAM1), Imm64(1ull << 32));
-	OR(64, R(ABI_PARAM2), R(ABI_PARAM1));
-	MOV(64, M(&PowerPC::ppcState.cr_val[field]), R(ABI_PARAM2));
+	BTS(64, R(RSCRATCH2), Imm8(32));
+	MOV(64, PPCSTATE(cr_val[field]), R(RSCRATCH2));
+}
+
+void Jit64::ClearCRFieldBit(int field, int bit)
+{
+	switch (bit)
+	{
+	case CR_SO_BIT:
+		BTR(64, PPCSTATE(cr_val[field]), Imm8(61));
+		break;
+
+	case CR_EQ_BIT:
+		OR(64, PPCSTATE(cr_val[field]), Imm8(1));
+		break;
+
+	case CR_GT_BIT:
+		BTS(64, PPCSTATE(cr_val[field]), Imm8(63));
+		break;
+
+	case CR_LT_BIT:
+		BTR(64, PPCSTATE(cr_val[field]), Imm8(62));
+		break;
+	}
+	// We don't need to set bit 32; the cases where that's needed only come up when setting bits, not clearing.
+}
+
+void Jit64::SetCRFieldBit(int field, int bit)
+{
+	MOV(64, R(RSCRATCH), PPCSTATE(cr_val[field]));
+	if (bit != CR_GT_BIT)
+	{
+		TEST(64, R(RSCRATCH), R(RSCRATCH));
+		FixupBranch dont_clear_gt = J_CC(CC_NZ);
+		BTS(64, R(RSCRATCH), Imm8(63));
+		SetJumpTarget(dont_clear_gt);
+	}
+
+	switch (bit)
+	{
+	case CR_SO_BIT:
+		BTS(64, PPCSTATE(cr_val[field]), Imm8(61));
+		break;
+
+	case CR_EQ_BIT:
+		SHR(64, R(RSCRATCH), Imm8(32));
+		SHL(64, R(RSCRATCH), Imm8(32));
+		break;
+
+	case CR_GT_BIT:
+		BTR(64, PPCSTATE(cr_val[field]), Imm8(63));
+		break;
+
+	case CR_LT_BIT:
+		BTS(64, PPCSTATE(cr_val[field]), Imm8(62));
+		break;
+	}
+
+	BTS(64, R(RSCRATCH), Imm8(32));
+	MOV(64, PPCSTATE(cr_val[field]), R(RSCRATCH));
 }
 
 FixupBranch Jit64::JumpIfCRFieldBit(int field, int bit, bool jump_if_set)
@@ -109,23 +152,20 @@ FixupBranch Jit64::JumpIfCRFieldBit(int field, int bit, bool jump_if_set)
 	switch (bit)
 	{
 	case CR_SO_BIT:  // check bit 61 set
-		MOV(64, R(RAX), Imm64(1ull << 61));
-		TEST(64, M(&PowerPC::ppcState.cr_val[field]), R(RAX));
-		return J_CC(jump_if_set ? CC_NZ : CC_Z, true);
+		BT(64, PPCSTATE(cr_val[field]), Imm8(61));
+		return J_CC(jump_if_set ? CC_C : CC_NC, true);
 
 	case CR_EQ_BIT:  // check bits 31-0 == 0
-		CMP(32, M(&PowerPC::ppcState.cr_val[field]), Imm32(0));
+		CMP(32, PPCSTATE(cr_val[field]), Imm8(0));
 		return J_CC(jump_if_set ? CC_Z : CC_NZ, true);
 
 	case CR_GT_BIT:  // check val > 0
-		MOV(64, R(RAX), M(&PowerPC::ppcState.cr_val[field]));
-		TEST(64, R(RAX), R(RAX));
+		CMP(64, PPCSTATE(cr_val[field]), Imm8(0));
 		return J_CC(jump_if_set ? CC_G : CC_LE, true);
 
 	case CR_LT_BIT:  // check bit 62 set
-		MOV(64, R(RAX), Imm64(1ull << 62));
-		TEST(64, M(&PowerPC::ppcState.cr_val[field]), R(RAX));
-		return J_CC(jump_if_set ? CC_NZ : CC_Z, true);
+		BT(64, PPCSTATE(cr_val[field]), Imm8(62));
+		return J_CC(jump_if_set ? CC_C : CC_NC, true);
 
 	default:
 		_assert_msg_(DYNA_REC, false, "Invalid CR bit");
@@ -158,7 +198,6 @@ void Jit64::mtspr(UGeckoInstruction inst)
 
 	case SPR_LR:
 	case SPR_CTR:
-	case SPR_XER:
 		// These are safe to do the easy way, see the bottom of this function.
 		break;
 
@@ -173,6 +212,24 @@ void Jit64::mtspr(UGeckoInstruction inst)
 		// These are safe to do the easy way, see the bottom of this function.
 		break;
 
+	case SPR_XER:
+		gpr.Lock(d);
+		gpr.BindToRegister(d, true, false);
+		MOV(32, R(RSCRATCH), gpr.R(d));
+		AND(32, R(RSCRATCH), Imm32(0xff7f));
+		MOV(16, PPCSTATE(xer_stringctrl), R(RSCRATCH));
+
+		MOV(32, R(RSCRATCH), gpr.R(d));
+		SHR(32, R(RSCRATCH), Imm8(XER_CA_SHIFT));
+		AND(8, R(RSCRATCH), Imm8(1));
+		MOV(8, PPCSTATE(xer_ca), R(RSCRATCH));
+
+		MOV(32, R(RSCRATCH), gpr.R(d));
+		SHR(32, R(RSCRATCH), Imm8(XER_OV_SHIFT));
+		MOV(8, PPCSTATE(xer_so_ov), R(RSCRATCH));
+		gpr.UnlockAll();
+		return;
+
 	default:
 		FALLBACK_IF(true);
 	}
@@ -183,7 +240,7 @@ void Jit64::mtspr(UGeckoInstruction inst)
 		gpr.Lock(d);
 		gpr.BindToRegister(d, true, false);
 	}
-	MOV(32, M(&PowerPC::ppcState.spr[iIndex]), gpr.R(d));
+	MOV(32, PPCSTATE(spr[iIndex]), gpr.R(d));
 	gpr.UnlockAll();
 }
 
@@ -195,10 +252,84 @@ void Jit64::mfspr(UGeckoInstruction inst)
 	int d = inst.RD;
 	switch (iIndex)
 	{
-	case SPR_WPAR:
-	case SPR_DEC:
 	case SPR_TL:
 	case SPR_TU:
+	{
+		// TODO: we really only need to call GetFakeTimeBase once per JIT block; this matters because
+		// typical use of this instruction is to call it three times, e.g. mftbu/mftbl/mftbu/cmpw/bne
+		// to deal with possible timer wraparound. This makes the second two (out of three) completely
+		// redundant for the JIT.
+		// no register choice
+
+		gpr.FlushLockX(RDX, RAX);
+
+		// An inline implementation of CoreTiming::GetFakeTimeBase, since in timer-heavy games the
+		// cost of calling out to C for this is actually significant.
+		MOV(64, R(RAX), M(&CoreTiming::globalTimer));
+		SUB(64, R(RAX), M(&CoreTiming::fakeTBStartTicks));
+		// It might seem convenient to correct the timer for the block position here for even more accurate
+		// timing, but as of currently, this can break games. If we end up reading a time *after* the time
+		// at which an interrupt was supposed to occur, e.g. because we're 100 cycles into a block with only
+		// 50 downcount remaining, some games don't function correctly, such as Karaoke Party Revolution,
+		// which won't get past the loading screen.
+		//if (js.downcountAmount)
+		//	ADD(64, R(RAX), Imm32(js.downcountAmount));
+		// a / 12 = (a * 0xAAAAAAAAAAAAAAAB) >> 67
+		MOV(64, R(RDX), Imm64(0xAAAAAAAAAAAAAAABULL));
+		MUL(64, R(RDX));
+		MOV(64, R(RAX), M(&CoreTiming::fakeTBStartValue));
+		SHR(64, R(RDX), Imm8(3));
+		ADD(64, R(RAX), R(RDX));
+		MOV(64, PPCSTATE(spr[SPR_TL]), R(RAX));
+
+		if (MergeAllowedNextInstructions(1))
+		{
+			const UGeckoInstruction& next = js.op[1].inst;
+			// Two calls of TU/TL next to each other are extremely common in typical usage, so merge them
+			// if we can.
+			u32 nextIndex = (next.SPRU << 5) | (next.SPRL & 0x1F);
+			// Be careful; the actual opcode is for mftb (371), not mfspr (339)
+			int n = next.RD;
+			if (next.OPCD == 31 && next.SUBOP10 == 371 && (nextIndex == SPR_TU || nextIndex == SPR_TL) && n != d)
+			{
+				js.downcountAmount++;
+				js.skipInstructions = 1;
+				gpr.Lock(d, n);
+				gpr.BindToRegister(d, false);
+				gpr.BindToRegister(n, false);
+				if (iIndex == SPR_TL)
+					MOV(32, gpr.R(d), R(RAX));
+				if (nextIndex == SPR_TL)
+					MOV(32, gpr.R(n), R(RAX));
+				SHR(64, R(RAX), Imm8(32));
+				if (iIndex == SPR_TU)
+					MOV(32, gpr.R(d), R(RAX));
+				if (nextIndex == SPR_TU)
+					MOV(32, gpr.R(n), R(RAX));
+				break;
+			}
+		}
+		gpr.Lock(d);
+		gpr.BindToRegister(d, false);
+		if (iIndex == SPR_TU)
+			SHR(64, R(RAX), Imm8(32));
+		MOV(32, gpr.R(d), R(RAX));
+		break;
+	}
+	case SPR_XER:
+		gpr.Lock(d);
+		gpr.BindToRegister(d, false);
+		MOVZX(32, 16, gpr.RX(d), PPCSTATE(xer_stringctrl));
+		MOVZX(32, 8, RSCRATCH, PPCSTATE(xer_ca));
+		SHL(32, R(RSCRATCH), Imm8(XER_CA_SHIFT));
+		OR(32, gpr.R(d), R(RSCRATCH));
+
+		MOVZX(32, 8, RSCRATCH, PPCSTATE(xer_so_ov));
+		SHL(32, R(RSCRATCH), Imm8(XER_OV_SHIFT));
+		OR(32, gpr.R(d), R(RSCRATCH));
+		break;
+	case SPR_WPAR:
+	case SPR_DEC:
 	case SPR_PMC1:
 	case SPR_PMC2:
 	case SPR_PMC3:
@@ -207,10 +338,11 @@ void Jit64::mfspr(UGeckoInstruction inst)
 	default:
 		gpr.Lock(d);
 		gpr.BindToRegister(d, false);
-		MOV(32, gpr.R(d), M(&PowerPC::ppcState.spr[iIndex]));
-		gpr.UnlockAll();
+		MOV(32, gpr.R(d), PPCSTATE(spr[iIndex]));
 		break;
 	}
+	gpr.UnlockAllX();
+	gpr.UnlockAll();
 }
 
 void Jit64::mtmsr(UGeckoInstruction inst)
@@ -223,7 +355,7 @@ void Jit64::mtmsr(UGeckoInstruction inst)
 		gpr.Lock(inst.RS);
 		gpr.BindToRegister(inst.RS, true, false);
 	}
-	MOV(32, M(&MSR), gpr.R(inst.RS));
+	MOV(32, PPCSTATE(msr), gpr.R(inst.RS));
 	gpr.UnlockAll();
 	gpr.Flush();
 	fpr.Flush();
@@ -231,26 +363,25 @@ void Jit64::mtmsr(UGeckoInstruction inst)
 	// If some exceptions are pending and EE are now enabled, force checking
 	// external exceptions when going out of mtmsr in order to execute delayed
 	// interrupts as soon as possible.
-	TEST(32, M(&MSR), Imm32(0x8000));
+	TEST(32, PPCSTATE(msr), Imm32(0x8000));
 	FixupBranch eeDisabled = J_CC(CC_Z);
 
-	TEST(32, M((void*)&PowerPC::ppcState.Exceptions), Imm32(EXCEPTION_EXTERNAL_INT | EXCEPTION_PERFORMANCE_MONITOR | EXCEPTION_DECREMENTER));
+	TEST(32, PPCSTATE(Exceptions), Imm32(EXCEPTION_EXTERNAL_INT | EXCEPTION_PERFORMANCE_MONITOR | EXCEPTION_DECREMENTER));
 	FixupBranch noExceptionsPending = J_CC(CC_Z);
 
 	// Check if a CP interrupt is waiting and keep the GPU emulation in sync (issue 4336)
-	TEST(32, M((void *)&ProcessorInterface::m_InterruptCause), Imm32(ProcessorInterface::INT_CAUSE_CP));
+	TEST(32, M(&ProcessorInterface::m_InterruptCause), Imm32(ProcessorInterface::INT_CAUSE_CP));
 	FixupBranch cpInt = J_CC(CC_NZ);
 
-	MOV(32, M(&PC), Imm32(js.compilerPC + 4));
+	MOV(32, PPCSTATE(pc), Imm32(js.compilerPC + 4));
 	WriteExternalExceptionExit();
 
 	SetJumpTarget(cpInt);
 	SetJumpTarget(noExceptionsPending);
 	SetJumpTarget(eeDisabled);
 
-	WriteExit(js.compilerPC + 4);
-
-	js.firstFPInstructionFound = false;
+	MOV(32, R(RSCRATCH), Imm32(js.compilerPC + 4));
+	WriteExitDestInRSCRATCH();
 }
 
 void Jit64::mfmsr(UGeckoInstruction inst)
@@ -260,7 +391,7 @@ void Jit64::mfmsr(UGeckoInstruction inst)
 	//Privileged?
 	gpr.Lock(inst.RD);
 	gpr.BindToRegister(inst.RD, false, true);
-	MOV(32, gpr.R(inst.RD), M(&MSR));
+	MOV(32, gpr.R(inst.RD), PPCSTATE(msr));
 	gpr.UnlockAll();
 }
 
@@ -275,49 +406,12 @@ void Jit64::mfcr(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITSystemRegistersOff);
-	// USES_CR
 	int d = inst.RD;
+	gpr.FlushLockX(RSCRATCH_EXTRA);
+	CALL((void *)asm_routines.mfcr);
 	gpr.Lock(d);
-	gpr.KillImmediate(d, false, true);
-	XOR(32, R(EAX), R(EAX));
-
-	gpr.FlushLockX(ABI_PARAM1, ABI_PARAM2);
-	X64Reg cr_val = ABI_PARAM1;
-	X64Reg tmp = ABI_PARAM2;
-	for (int i = 0; i < 8; i++)
-	{
-		if (i != 0)
-			SHL(32, R(EAX), Imm8(4));
-
-		MOV(64, R(cr_val), M(&PowerPC::ppcState.cr_val[i]));
-
-		// SO: Bit 61 set.
-		MOV(64, R(tmp), R(cr_val));
-		SHR(64, R(tmp), Imm8(61));
-		AND(32, R(tmp), Imm8(1));
-		OR(32, R(EAX), R(tmp));
-
-		// EQ: Bits 31-0 == 0.
-		XOR(32, R(tmp), R(tmp));
-		TEST(32, R(cr_val), R(cr_val));
-		SETcc(CC_Z, R(tmp));
-		SHL(32, R(tmp), Imm8(1));
-		OR(32, R(EAX), R(tmp));
-
-		// GT: Value > 0.
-		TEST(64, R(cr_val), R(cr_val));
-		SETcc(CC_G, R(tmp));
-		SHL(32, R(tmp), Imm8(2));
-		OR(32, R(EAX), R(tmp));
-
-		// LT: Bit 62 set.
-		MOV(64, R(tmp), R(cr_val));
-		SHR(64, R(tmp), Imm8(62 - 3));
-		AND(32, R(tmp), Imm8(0x8));
-		OR(32, R(EAX), R(tmp));
-	}
-
-	MOV(32, gpr.R(d), R(EAX));
+	gpr.BindToRegister(d, false, true);
+	MOV(32, gpr.R(d), R(RSCRATCH));
 	gpr.UnlockAll();
 	gpr.UnlockAllX();
 }
@@ -337,9 +431,17 @@ void Jit64::mtcrf(UGeckoInstruction inst)
 			{
 				if ((crm & (0x80 >> i)) != 0)
 				{
-					u8 newcr = (gpr.R(inst.RS).offset >> (28 - (i * 4))) & 0xF;
-					MOV(64, R(RAX), Imm64(PPCCRToInternal(newcr)));
-					MOV(64, M(&PowerPC::ppcState.cr_val[i]), R(RAX));
+					u8 newcr = (gpr.R(inst.RS).Imm32() >> (28 - (i * 4))) & 0xF;
+					u64 newcrval = PPCCRToInternal(newcr);
+					if ((s64)newcrval == (s32)newcrval)
+					{
+						MOV(64, PPCSTATE(cr_val[i]), Imm32((s32)newcrval));
+					}
+					else
+					{
+						MOV(64, R(RSCRATCH), Imm64(newcrval));
+						MOV(64, PPCSTATE(cr_val[i]), R(RSCRATCH));
+					}
 				}
 			}
 		}
@@ -347,50 +449,20 @@ void Jit64::mtcrf(UGeckoInstruction inst)
 		{
 			gpr.Lock(inst.RS);
 			gpr.BindToRegister(inst.RS, true, false);
-			gpr.FlushLockX(ABI_PARAM1, ABI_PARAM2);
 			for (int i = 0; i < 8; i++)
 			{
 				if ((crm & (0x80 >> i)) != 0)
 				{
-					MOVZX(64, 32, EAX, gpr.R(inst.RS));
-					SHR(64, R(EAX), Imm8(28 - (i * 4)));
-					AND(64, R(EAX), Imm32(0xF));
-
-					X64Reg cr_val = ABI_PARAM1;
-					X64Reg tmp = ABI_PARAM2;
-
-					MOV(64, R(cr_val), Imm64(1ull << 32));
-
-					// SO
-					MOV(64, R(tmp), R(EAX));
-					SHL(64, R(tmp), Imm8(63));
-					SHR(64, R(tmp), Imm8(63 - 61));
-					OR(64, R(cr_val), R(tmp));
-
-					// EQ
-					MOV(64, R(tmp), R(EAX));
-					NOT(64, R(tmp));
-					AND(64, R(tmp), Imm8(CR_EQ));
-					OR(64, R(cr_val), R(tmp));
-
-					// GT
-					MOV(64, R(tmp), R(EAX));
-					NOT(64, R(tmp));
-					AND(64, R(tmp), Imm8(CR_GT));
-					SHL(64, R(tmp), Imm8(63 - 2));
-					OR(64, R(cr_val), R(tmp));
-
-					// LT
-					MOV(64, R(tmp), R(EAX));
-					AND(64, R(tmp), Imm8(CR_LT));
-					SHL(64, R(tmp), Imm8(62 - 3));
-					OR(64, R(cr_val), R(tmp));
-
-					MOV(64, M(&PowerPC::ppcState.cr_val[i]), R(cr_val));
+					MOV(32, R(RSCRATCH), gpr.R(inst.RS));
+					if (i != 7)
+						SHR(32, R(RSCRATCH), Imm8(28 - (i * 4)));
+					if (i != 0)
+						AND(32, R(RSCRATCH), Imm8(0xF));
+					MOV(64, R(RSCRATCH), MScaled(RSCRATCH, SCALE_8, (u32)(u64)m_crTable));
+					MOV(64, PPCSTATE(cr_val[i]), R(RSCRATCH));
 				}
 			}
 			gpr.UnlockAll();
-			gpr.UnlockAllX();
 		}
 	}
 }
@@ -403,8 +475,8 @@ void Jit64::mcrf(UGeckoInstruction inst)
 	// USES_CR
 	if (inst.CRFS != inst.CRFD)
 	{
-		MOV(64, R(EAX), M(&PowerPC::ppcState.cr_val[inst.CRFS]));
-		MOV(64, M(&PowerPC::ppcState.cr_val[inst.CRFD]), R(EAX));
+		MOV(64, R(RSCRATCH), PPCSTATE(cr_val[inst.CRFS]));
+		MOV(64, PPCSTATE(cr_val[inst.CRFD]), R(RSCRATCH));
 	}
 }
 
@@ -413,47 +485,20 @@ void Jit64::mcrxr(UGeckoInstruction inst)
 	INSTRUCTION_START
 	JITDISABLE(bJITSystemRegistersOff);
 
-	// USES_CR
-
 	// Copy XER[0-3] into CR[inst.CRFD]
-	MOVZX(64, 32, EAX, M(&PowerPC::ppcState.spr[SPR_XER]));
-	SHR(64, R(EAX), Imm8(28));
+	MOVZX(32, 8, RSCRATCH, PPCSTATE(xer_ca));
+	MOVZX(32, 8, RSCRATCH2, PPCSTATE(xer_so_ov));
+	// [0 SO OV CA]
+	LEA(32, RSCRATCH, MComplex(RSCRATCH, RSCRATCH2, SCALE_2, 0));
+	// [SO OV CA 0] << 3
+	SHL(32, R(RSCRATCH), Imm8(4));
 
-	gpr.FlushLockX(ABI_PARAM1, ABI_PARAM2);
-	X64Reg cr_val = ABI_PARAM1;
-	X64Reg tmp = ABI_PARAM2;
-
-	MOV(64, R(cr_val), Imm64(1ull << 32));
-
-	// SO
-	MOV(64, R(tmp), R(EAX));
-	SHL(64, R(tmp), Imm8(63));
-	SHR(64, R(tmp), Imm8(63 - 61));
-	OR(64, R(cr_val), R(tmp));
-
-	// EQ
-	MOV(64, R(tmp), R(EAX));
-	AND(64, R(tmp), Imm8(0x2));
-	OR(64, R(cr_val), R(tmp));
-
-	// GT
-	MOV(64, R(tmp), R(EAX));
-	NOT(64, R(tmp));
-	AND(64, R(tmp), Imm8(0x4));
-	SHL(64, R(tmp), Imm8(63 - 2));
-	OR(64, R(cr_val), R(tmp));
-
-	// LT
-	MOV(64, R(tmp), R(EAX));
-	AND(64, R(tmp), Imm8(0x8));
-	SHL(64, R(tmp), Imm8(62 - 3));
-	OR(64, R(cr_val), R(tmp));
-
-	MOV(64, M(&PowerPC::ppcState.cr_val[inst.CRFD]), R(cr_val));
-	gpr.UnlockAllX();
+	MOV(64, R(RSCRATCH), MDisp(RSCRATCH, (u32)(u64)m_crTable));
+	MOV(64, PPCSTATE(cr_val[inst.CRFD]), R(RSCRATCH));
 
 	// Clear XER[0-3]
-	AND(32, M(&PowerPC::ppcState.spr[SPR_XER]), Imm32(0x0FFFFFFF));
+	MOV(8, PPCSTATE(xer_ca), Imm8(0));
+	MOV(8, PPCSTATE(xer_so_ov), Imm8(0));
 }
 
 void Jit64::crXXX(UGeckoInstruction inst)
@@ -462,59 +507,53 @@ void Jit64::crXXX(UGeckoInstruction inst)
 	JITDISABLE(bJITSystemRegistersOff);
 	_dbg_assert_msg_(DYNA_REC, inst.OPCD == 19, "Invalid crXXX");
 
+	// Special case: crclr
+	if (inst.CRBA == inst.CRBB && inst.CRBA == inst.CRBD && inst.SUBOP10 == 193)
+	{
+		ClearCRFieldBit(inst.CRBD >> 2, 3 - (inst.CRBD & 3));
+		return;
+	}
+
+	// Special case: crset
+	if (inst.CRBA == inst.CRBB && inst.CRBA == inst.CRBD && inst.SUBOP10 == 289)
+	{
+		SetCRFieldBit(inst.CRBD >> 2, 3 - (inst.CRBD & 3));
+		return;
+	}
+
 	// TODO(delroth): Potential optimizations could be applied here. For
 	// instance, if the two CR bits being loaded are the same, two loads are
 	// not required.
 
-	// USES_CR
+	// creqv or crnand or crnor
+	bool negateA = inst.SUBOP10 == 289 || inst.SUBOP10 == 225 || inst.SUBOP10 == 33;
+	// crandc or crorc or crnand or crnor
+	bool negateB = inst.SUBOP10 == 129 || inst.SUBOP10 == 417 || inst.SUBOP10 == 225 || inst.SUBOP10 == 33;
 
-	gpr.FlushLockX(ABI_PARAM1, ABI_PARAM2);
-	GetCRFieldBit(inst.CRBA >> 2, 3 - (inst.CRBA & 3), ABI_PARAM2);
-	GetCRFieldBit(inst.CRBB >> 2, 3 - (inst.CRBB & 3), EAX);
+	GetCRFieldBit(inst.CRBA >> 2, 3 - (inst.CRBA & 3), RSCRATCH, negateA);
+	GetCRFieldBit(inst.CRBB >> 2, 3 - (inst.CRBB & 3), RSCRATCH2, negateB);
 
 	// Compute combined bit
 	switch (inst.SUBOP10)
 	{
-	case 33:  // crnor
-		OR(8, R(EAX), R(ABI_PARAM2));
-		NOT(8, R(EAX));
+	case 33:  // crnor: ~(A || B) == (~A && ~B)
+	case 129: // crandc: A && ~B
+	case 257: // crand:  A && B
+		AND(8, R(RSCRATCH), R(RSCRATCH2));
 		break;
 
-	case 129: // crandc
-		NOT(8, R(ABI_PARAM2));
-		AND(8, R(EAX), R(ABI_PARAM2));
+	case 193: // crxor: A ^ B
+	case 289: // creqv: ~(A ^ B) = ~A ^ B
+		XOR(8, R(RSCRATCH), R(RSCRATCH2));
 		break;
 
-	case 193: // crxor
-		XOR(8, R(EAX), R(ABI_PARAM2));
-		break;
-
-	case 225: // crnand
-		AND(8, R(EAX), R(ABI_PARAM2));
-		NOT(8, R(EAX));
-		break;
-
-	case 257: // crand
-		AND(8, R(EAX), R(ABI_PARAM2));
-		break;
-
-	case 289: // creqv
-		XOR(8, R(EAX), R(ABI_PARAM2));
-		NOT(8, R(EAX));
-		break;
-
-	case 417: // crorc
-		NOT(8, R(ABI_PARAM2));
-		OR(8, R(EAX), R(ABI_PARAM2));
-		break;
-
-	case 449: // cror
-		OR(8, R(EAX), R(ABI_PARAM2));
+	case 225: // crnand: ~(A && B) == (~A || ~B)
+	case 417: // crorc: A || ~B
+	case 449: // cror:  A || B
+		OR(8, R(RSCRATCH), R(RSCRATCH2));
 		break;
 	}
 
 	// Store result bit in CRBD
-	SetCRFieldBit(inst.CRBD >> 2, 3 - (inst.CRBD & 3), EAX);
-
-	gpr.UnlockAllX();
+	SetCRFieldBit(inst.CRBD >> 2, 3 - (inst.CRBD & 3), RSCRATCH);
 }

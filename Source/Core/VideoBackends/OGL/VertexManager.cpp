@@ -41,6 +41,7 @@ static size_t s_baseVertex;
 static size_t s_index_offset;
 
 VertexManager::VertexManager()
+	: m_cpu_v_buffer(MAX_VBUFFER_SIZE), m_cpu_i_buffer(MAX_IBUFFER_SIZE)
 {
 	CreateDeviceObjects();
 }
@@ -63,14 +64,8 @@ void VertexManager::CreateDeviceObjects()
 
 void VertexManager::DestroyDeviceObjects()
 {
-	GL_REPORT_ERRORD();
-	glBindBuffer(GL_ARRAY_BUFFER, 0 );
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0 );
-	GL_REPORT_ERROR();
-
 	delete s_vertexBuffer;
 	delete s_indexBuffer;
-	GL_REPORT_ERROR();
 }
 
 void VertexManager::PrepareDrawBuffers(u32 stride)
@@ -87,14 +82,25 @@ void VertexManager::PrepareDrawBuffers(u32 stride)
 
 void VertexManager::ResetBuffer(u32 stride)
 {
-	auto buffer = s_vertexBuffer->Map(MAXVBUFFERSIZE, stride);
-	s_pCurBufferPointer = s_pBaseBufferPointer = buffer.first;
-	s_pEndBufferPointer = buffer.first + MAXVBUFFERSIZE;
-	s_baseVertex = buffer.second / stride;
+	if (s_cull_all)
+	{
+		// This buffer isn't getting sent to the GPU. Just allocate it on the cpu.
+		s_pCurBufferPointer = s_pBaseBufferPointer = m_cpu_v_buffer.data();
+		s_pEndBufferPointer = s_pBaseBufferPointer + m_cpu_v_buffer.size();
 
-	buffer = s_indexBuffer->Map(MAXIBUFFERSIZE * sizeof(u16));
-	IndexGenerator::Start((u16*)buffer.first);
-	s_index_offset = buffer.second;
+		IndexGenerator::Start((u16*)m_cpu_i_buffer.data());
+	}
+	else
+	{
+		auto buffer = s_vertexBuffer->Map(MAXVBUFFERSIZE, stride);
+		s_pCurBufferPointer = s_pBaseBufferPointer = buffer.first;
+		s_pEndBufferPointer = buffer.first + MAXVBUFFERSIZE;
+		s_baseVertex = buffer.second / stride;
+
+		buffer = s_indexBuffer->Map(MAXIBUFFERSIZE * sizeof(u16));
+		IndexGenerator::Start((u16*)buffer.first);
+		s_index_offset = buffer.second;
+	}
 }
 
 void VertexManager::Draw(u32 stride)
@@ -107,21 +113,30 @@ void VertexManager::Draw(u32 stride)
 	{
 		case PRIMITIVE_POINTS:
 			primitive_mode = GL_POINTS;
+			glDisable(GL_CULL_FACE);
 			break;
 		case PRIMITIVE_LINES:
 			primitive_mode = GL_LINES;
+			glDisable(GL_CULL_FACE);
 			break;
 		case PRIMITIVE_TRIANGLES:
 			primitive_mode = g_ActiveConfig.backend_info.bSupportsPrimitiveRestart ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
 			break;
 	}
 
-	if (g_ogl_config.bSupportsGLBaseVertex) {
+	if (g_ogl_config.bSupportsGLBaseVertex)
+	{
 		glDrawRangeElementsBaseVertex(primitive_mode, 0, max_index, index_size, GL_UNSIGNED_SHORT, (u8*)nullptr+s_index_offset, (GLint)s_baseVertex);
-	} else {
+	}
+	else
+	{
 		glDrawRangeElements(primitive_mode, 0, max_index, index_size, GL_UNSIGNED_SHORT, (u8*)nullptr+s_index_offset);
 	}
+
 	INCSTAT(stats.thisFrame.numDrawCalls);
+
+	if (current_primitive_type != PRIMITIVE_TRIANGLES)
+		((OGL::Renderer*)g_renderer)->SetGenerationMode();
 }
 
 void VertexManager::vFlush(bool useDstAlpha)
@@ -129,13 +144,13 @@ void VertexManager::vFlush(bool useDstAlpha)
 	GLVertexFormat *nativeVertexFmt = (GLVertexFormat*)VertexLoaderManager::GetCurrentVertexFormat();
 	u32 stride  = nativeVertexFmt->GetVertexStride();
 
-	if (m_last_vao != nativeVertexFmt->VAO) {
+	if (m_last_vao != nativeVertexFmt->VAO)
+	{
 		glBindVertexArray(nativeVertexFmt->VAO);
 		m_last_vao = nativeVertexFmt->VAO;
 	}
 
 	PrepareDrawBuffers(stride);
-	GL_REPORT_ERRORD();
 
 	// Makes sure we can actually do Dual source blending
 	bool dualSourcePossible = g_ActiveConfig.backend_info.bSupportsDualSourceBlend;
@@ -144,11 +159,11 @@ void VertexManager::vFlush(bool useDstAlpha)
 	// the same pass as regular rendering.
 	if (useDstAlpha && dualSourcePossible)
 	{
-		ProgramShaderCache::SetShader(DSTALPHA_DUAL_SOURCE_BLEND, nativeVertexFmt->m_components);
+		ProgramShaderCache::SetShader(DSTALPHA_DUAL_SOURCE_BLEND, nativeVertexFmt->m_components, current_primitive_type);
 	}
 	else
 	{
-		ProgramShaderCache::SetShader(DSTALPHA_NONE, nativeVertexFmt->m_components);
+		ProgramShaderCache::SetShader(DSTALPHA_NONE, nativeVertexFmt->m_components, current_primitive_type);
 	}
 
 	// upload global constants
@@ -156,14 +171,13 @@ void VertexManager::vFlush(bool useDstAlpha)
 
 	// setup the pointers
 	nativeVertexFmt->SetupVertexPointers();
-	GL_REPORT_ERRORD();
 
 	Draw(stride);
 
 	// run through vertex groups again to set alpha
 	if (useDstAlpha && !dualSourcePossible)
 	{
-		ProgramShaderCache::SetShader(DSTALPHA_ALPHA_PASS, nativeVertexFmt->m_components);
+		ProgramShaderCache::SetShader(DSTALPHA_ALPHA_PASS, nativeVertexFmt->m_components, current_primitive_type);
 
 		// only update alpha
 		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
@@ -209,8 +223,6 @@ void VertexManager::vFlush(bool useDstAlpha)
 	g_Config.iSaveTargetId++;
 
 	ClearEFBCache();
-
-	GL_REPORT_ERRORD();
 }
 
 

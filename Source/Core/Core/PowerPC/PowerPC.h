@@ -4,8 +4,10 @@
 
 #pragma once
 
+#include <tuple>
+
 #include "Common/BreakPoints.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #include "Core/Debugger/PPCDebugInterface.h"
 #include "Core/PowerPC/CPUCoreBase.h"
@@ -19,21 +21,44 @@ extern CPUCoreBase *cpu_core_base;
 namespace PowerPC
 {
 
+enum
+{
+	CORE_INTERPRETER,
+	CORE_JIT64,
+	CORE_JITIL64,
+	CORE_JITARM,
+	CORE_JITARM64
+};
+
 enum CoreMode
 {
 	MODE_INTERPRETER,
 	MODE_JIT,
 };
 
+// TLB cache
+#define TLB_SIZE 128
+#define NUM_TLBS 2
+#define TLB_WAYS 2
+
+#define HW_PAGE_INDEX_SHIFT 12
+#define HW_PAGE_INDEX_MASK 0x3f
+#define HW_PAGE_TAG_SHIFT 18
+
+#define TLB_TAG_INVALID 0xffffffff
+
+struct tlb_entry
+{
+	u32 tag[TLB_WAYS];
+	u32 paddr[TLB_WAYS];
+	u32 pte[TLB_WAYS];
+	u8 recent;
+};
+
 // This contains the entire state of the emulated PowerPC "Gekko" CPU.
 struct GC_ALIGNED64(PowerPCState)
 {
 	u32 gpr[32];    // General purpose registers. r1 = stack pointer.
-
-	// The paired singles are strange : PS0 is stored in the full 64 bits of each FPR
-	// but ps calculations are only done in 32-bit precision, and PS1 is only 32 bits.
-	// Since we want to use SIMD, SSE2 is the only viable alternative - 2x double.
-	u64 ps[32][2];
 
 	u32 pc;     // program counter
 	u32 npc;
@@ -57,34 +82,50 @@ struct GC_ALIGNED64(PowerPCState)
 	u32 fpscr;  // floating point flags/status bits
 
 	// Exception management.
-	volatile u32 Exceptions;
+	u32 Exceptions;
 
 	// Downcount for determining when we need to do timing
 	// This isn't quite the right location for it, but it is here to accelerate the ARM JIT
 	// This variable should be inside of the CoreTiming namespace if we wanted to be correct.
 	int downcount;
 
-	u32 sr[16];  // Segment registers.
+	// XER, reformatted into byte fields for easier access.
+	u8 xer_ca;
+	u8 xer_so_ov; // format: (SO << 1) | OV
+	// The Broadway CPU implements bits 16-23 of the XER register... even though it doesn't support lscbx
+	u16 xer_stringctrl;
 
-	u32 DebugCount;
+#if _M_X86_64
+	// This member exists for the purpose of an assertion in x86 JitBase.cpp
+	// that its offset <= 0x100.  To minimize code size on x86, we want as much
+	// useful stuff in the one-byte offset range as possible - which is why ps
+	// is sitting down here.  It currently doesn't make a difference on other
+	// supported architectures.
+	std::tuple<> above_fits_in_first_0x100;
+#endif
+
+	// The paired singles are strange : PS0 is stored in the full 64 bits of each FPR
+	// but ps calculations are only done in 32-bit precision, and PS1 is only 32 bits.
+	// Since we want to use SIMD, SSE2 is the only viable alternative - 2x double.
+	GC_ALIGNED16(u64 ps[32][2]);
+
+	u32 sr[16];  // Segment registers.
 
 	// special purpose registers - controls quantizers, DMA, and lots of other misc extensions.
 	// also for power management, but we don't care about that.
 	u32 spr[1024];
 
-	u32 dtlb_last;
-	u32 dtlb_va[128];
-	u32 dtlb_pa[128];
-
-	u32 itlb_last;
-	u32 itlb_va[128];
-	u32 itlb_pa[128];
+	tlb_entry tlb[NUM_TLBS][TLB_SIZE / TLB_WAYS];
 
 	u32 pagetable_base;
 	u32 pagetable_hashmask;
 
 	InstructionCache iCache;
 };
+
+#if _M_X86_64
+static_assert(offsetof(PowerPC::PowerPCState, above_fits_in_first_0x100) <= 0x100, "top of PowerPCState too big");
+#endif
 
 enum CPUState
 {
@@ -95,6 +136,7 @@ enum CPUState
 
 extern PowerPCState ppcState;
 
+extern Watches watches;
 extern BreakPoints breakpoints;
 extern MemChecks memchecks;
 extern PPCDebugInterface debug_interface;
@@ -120,8 +162,7 @@ volatile CPUState *GetStatePtr();  // this oddity is here instead of an extern d
 u32 CompactCR();
 void ExpandCR(u32 cr);
 
-void OnIdle(u32 _uThreadAddr);
-void OnIdleIL();
+void OnIdle();
 
 void UpdatePerformanceMonitor(u32 cycles, u32 num_load_stores, u32 num_fp_inst);
 
@@ -160,6 +201,77 @@ void UpdatePerformanceMonitor(u32 cycles, u32 num_load_stores, u32 num_fp_inst);
 #define riPS0(i) (*(u64*)(&PowerPC::ppcState.ps[i][0]))
 #define riPS1(i) (*(u64*)(&PowerPC::ppcState.ps[i][1]))
 
+// Routines for debugger UI, cheats, etc. to access emulated memory from the
+// perspective of the CPU.  Not for use by core emulation routines.
+// Use "Host_" prefix.
+u8 HostRead_U8(const u32 address);
+u16 HostRead_U16(const u32 address);
+u32 HostRead_U32(const u32 address);
+u32 HostRead_Instruction(const u32 address);
+
+void HostWrite_U8(const u8 var, const u32 address);
+void HostWrite_U16(const u16 var, const u32 address);
+void HostWrite_U32(const u32 var, const u32 address);
+void HostWrite_U64(const u64 var, const u32 address);
+
+// Returns whether a read or write to the given address will resolve to a RAM
+// access given the current CPU state.
+bool HostIsRAMAddress(const u32 address);
+
+std::string HostGetString(u32 em_address, size_t size = 0);
+
+// Routines for the CPU core to access memory.
+
+// Used by interpreter to read instructions, uses iCache
+u32 Read_Opcode(const u32 address);
+struct TryReadInstResult
+{
+	bool valid;
+	bool from_bat;
+	u32 hex;
+};
+TryReadInstResult TryReadInstruction(const u32 address);
+
+u8  Read_U8(const u32 address);
+u16 Read_U16(const u32 address);
+u32 Read_U32(const u32 address);
+u64 Read_U64(const u32 address);
+
+// Useful helper functions, used by ARM JIT
+float Read_F32(const u32 address);
+double Read_F64(const u32 address);
+
+// used by JIT. Return zero-extended 32bit values
+u32 Read_U8_ZX(const u32 address);
+u32 Read_U16_ZX(const u32 address);
+
+void Write_U8(const u8 var, const u32 address);
+void Write_U16(const u16 var, const u32 address);
+void Write_U32(const u32 var, const u32 address);
+void Write_U64(const u64 var, const u32 address);
+
+void Write_U16_Swap(const u16 var, const u32 address);
+void Write_U32_Swap(const u32 var, const u32 address);
+void Write_U64_Swap(const u64 var, const u32 address);
+
+// Useful helper functions, used by ARM JIT
+void Write_F64(const double var, const u32 address);
+
+void DMA_LCToMemory(const u32 memAddr, const u32 cacheAddr, const u32 numBlocks);
+void DMA_MemoryToLC(const u32 cacheAddr, const u32 memAddr, const u32 numBlocks);
+void ClearCacheLine(const u32 address); // Zeroes 32 bytes; address should be 32-byte-aligned
+
+// TLB functions
+void SDRUpdated();
+void InvalidateTLBEntry(u32 address);
+
+// Result changes based on the BAT registers and MSR.DR.  Returns whether
+// it's safe to optimize a read or write to this address to an unguarded
+// memory access.  Does not consider page tables.
+bool IsOptimizableRAMAddress(const u32 address);
+u32 IsOptimizableMMIOAccess(u32 address, u32 accessSize);
+bool IsOptimizableGatherPipeWrite(u32 address);
+
 }  // namespace
 
 enum CRBits
@@ -187,14 +299,19 @@ inline u64 PPCCRToInternal(u8 value)
 	return cr_val;
 }
 
+// convert flags into 64-bit CR values with a lookup table
+extern const u64 m_crTable[16];
+
 // Warning: these CR operations are fairly slow since they need to convert from
 // PowerPC format (4 bit) to our internal 64 bit format. See the definition of
 // ppcState.cr_val for more explanations.
-inline void SetCRField(int cr_field, int value) {
-	PowerPC::ppcState.cr_val[cr_field] = PPCCRToInternal(value);
+inline void SetCRField(int cr_field, int value)
+{
+	PowerPC::ppcState.cr_val[cr_field] = m_crTable[value];
 }
 
-inline u32 GetCRField(int cr_field) {
+inline u32 GetCRField(int cr_field)
+{
 	u64 cr_val = PowerPC::ppcState.cr_val[cr_field];
 	u32 ppc_cr = 0;
 
@@ -210,11 +327,13 @@ inline u32 GetCRField(int cr_field) {
 	return ppc_cr;
 }
 
-inline u32 GetCRBit(int bit) {
+inline u32 GetCRBit(int bit)
+{
 	return (GetCRField(bit >> 2) >> (3 - (bit & 3))) & 1;
 }
 
-inline void SetCRBit(int bit, int value) {
+inline void SetCRBit(int bit, int value)
+{
 	if (value & 1)
 		SetCRField(bit >> 2, GetCRField(bit >> 2) | (0x8 >> (bit & 3)));
 	else
@@ -222,37 +341,50 @@ inline void SetCRBit(int bit, int value) {
 }
 
 // SetCR and GetCR are fairly slow. Should be avoided if possible.
-inline void SetCR(u32 new_cr) {
+inline void SetCR(u32 new_cr)
+{
 	PowerPC::ExpandCR(new_cr);
 }
 
-inline u32 GetCR() {
+inline u32 GetCR()
+{
 	return PowerPC::CompactCR();
 }
 
-// SetCarry/GetCarry may speed up soon.
-inline void SetCarry(int ca) {
-	((UReg_XER&)PowerPC::ppcState.spr[SPR_XER]).CA = ca;
+inline void SetCarry(int ca)
+{
+	PowerPC::ppcState.xer_ca = ca;
 }
 
-inline int GetCarry() {
-	return ((UReg_XER&)PowerPC::ppcState.spr[SPR_XER]).CA;
+inline int GetCarry()
+{
+	return PowerPC::ppcState.xer_ca;
 }
 
-inline UReg_XER GetXER() {
-	return ((UReg_XER&)PowerPC::ppcState.spr[SPR_XER]);
+inline UReg_XER GetXER()
+{
+	u32 xer = 0;
+	xer |= PowerPC::ppcState.xer_stringctrl;
+	xer |= PowerPC::ppcState.xer_ca << XER_CA_SHIFT;
+	xer |= PowerPC::ppcState.xer_so_ov << XER_OV_SHIFT;
+	return xer;
 }
 
-inline void SetXER(UReg_XER new_xer) {
-	((UReg_XER&)PowerPC::ppcState.spr[SPR_XER]) = new_xer;
+inline void SetXER(UReg_XER new_xer)
+{
+	PowerPC::ppcState.xer_stringctrl = new_xer.BYTE_COUNT + (new_xer.BYTE_CMP << 8);
+	PowerPC::ppcState.xer_ca = new_xer.CA;
+	PowerPC::ppcState.xer_so_ov = (new_xer.SO << 1) + new_xer.OV;
 }
 
-inline int GetXER_SO() {
-	return ((UReg_XER&)PowerPC::ppcState.spr[SPR_XER]).SO;
+inline int GetXER_SO()
+{
+	return PowerPC::ppcState.xer_so_ov >> 1;
 }
 
-inline void SetXER_SO(int value) {
-	((UReg_XER&)PowerPC::ppcState.spr[SPR_XER]).SO = value;
+inline void SetXER_SO(int value)
+{
+	PowerPC::ppcState.xer_so_ov |= value << 1;
 }
 
 void UpdateFPRF(double dvalue);

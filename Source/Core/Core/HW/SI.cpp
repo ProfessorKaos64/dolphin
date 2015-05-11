@@ -5,7 +5,7 @@
 #include <algorithm>
 
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #include "Core/ConfigManager.h"
 #include "Core/CoreTiming.h"
@@ -23,8 +23,9 @@ namespace SerialInterface
 {
 
 static int changeDevice;
+static int et_transfer_pending;
 
-void RunSIBuffer();
+void RunSIBuffer(u64 userdata, int cyclesLate);
 void UpdateInterrupts();
 
 // SI Interrupt Types
@@ -230,8 +231,7 @@ void DoState(PointerWrap &p)
 			// if we had to create a temporary device, discard it if we're not loading.
 			// also, if no movie is active, we'll assume the user wants to keep their current devices
 			// instead of the ones they had when the savestate was created.
-			if (p.GetMode() != PointerWrap::MODE_READ ||
-				(!Movie::IsRecordingInput() && !Movie::IsPlayingInput()))
+			if (p.GetMode() != PointerWrap::MODE_READ || !Movie::IsMovieActive())
 			{
 				delete pSaveDevice;
 			}
@@ -257,7 +257,7 @@ void Init()
 		g_Channel[i].m_InHi.Hex = 0;
 		g_Channel[i].m_InLo.Hex = 0;
 
-		if (Movie::IsRecordingInput() || Movie::IsPlayingInput())
+		if (Movie::IsMovieActive())
 			AddDevice(Movie::IsUsingPad(i) ?  (Movie::IsUsingBongo(i) ? SIDEVICE_GC_TARUKONGA : SIDEVICE_GC_CONTROLLER) : SIDEVICE_NONE, i);
 		else if (!NetPlay::IsNetPlayRunning())
 			AddDevice(SConfig::GetInstance().m_SIDevice[i], i);
@@ -271,10 +271,11 @@ void Init()
 	g_StatusReg.Hex = 0;
 
 	g_EXIClockCount.Hex = 0;
-	//g_EXIClockCount.LOCK = 1; // Supposedly set on reset, but logs from real wii don't look like it is...
+	//g_EXIClockCount.LOCK = 1; // Supposedly set on reset, but logs from real Wii don't look like it is...
 	memset(g_SIBuffer, 0, 128);
 
 	changeDevice = CoreTiming::RegisterEvent("ChangeSIDevice", ChangeDeviceCallback);
+	et_transfer_pending = CoreTiming::RegisterEvent("SITransferPending", RunSIBuffer);
 }
 
 void Shutdown()
@@ -347,8 +348,18 @@ void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
 			if (tmpComCSR.TCINT)   g_ComCSR.TCINT = 0;
 
 			// be careful: run si-buffer after updating the INT flags
-			if (tmpComCSR.TSTART)  RunSIBuffer();
-			UpdateInterrupts();
+			if (tmpComCSR.TSTART)
+			{
+				g_ComCSR.TSTART = 1;
+				RunSIBuffer(0, 0);
+			}
+			else if (g_ComCSR.TSTART)
+			{
+				CoreTiming::RemoveEvent(et_transfer_pending);
+			}
+
+			if (!g_ComCSR.TSTART)
+				UpdateInterrupts();
 		})
 	);
 
@@ -474,22 +485,31 @@ static void SetNoResponse(u32 channel)
 void ChangeDeviceCallback(u64 userdata, int cyclesLate)
 {
 	u8 channel = (u8)(userdata >> 32);
+	SIDevices device = (SIDevices)(u32)userdata;
 
-	g_Channel[channel].m_Out.Hex = 0;
-	g_Channel[channel].m_InHi.Hex = 0;
-	g_Channel[channel].m_InLo.Hex = 0;
+	// Skip redundant (spammed) device changes
+	if (GetDeviceType(channel) != device)
+	{
+		g_Channel[channel].m_Out.Hex = 0;
+		g_Channel[channel].m_InHi.Hex = 0;
+		g_Channel[channel].m_InLo.Hex = 0;
 
-	SetNoResponse(channel);
+		SetNoResponse(channel);
 
-	AddDevice((SIDevices)(u32)userdata, channel);
+		AddDevice(device, channel);
+	}
 }
 
 void ChangeDevice(SIDevices device, int channel)
 {
 	// Called from GUI, so we need to make it thread safe.
 	// Let the hardware see no device for .5b cycles
-	CoreTiming::ScheduleEvent_Threadsafe(0, changeDevice, ((u64)channel << 32) | SIDEVICE_NONE);
-	CoreTiming::ScheduleEvent_Threadsafe(500000000, changeDevice, ((u64)channel << 32) | device);
+	// TODO: Calling GetDeviceType here isn't threadsafe.
+	if (GetDeviceType(channel) != device)
+	{
+		CoreTiming::ScheduleEvent_Threadsafe(0, changeDevice, ((u64)channel << 32) | SIDEVICE_NONE);
+		CoreTiming::ScheduleEvent_Threadsafe(500000000, changeDevice, ((u64)channel << 32) | device);
+	}
 }
 
 void UpdateDevices()
@@ -503,35 +523,54 @@ void UpdateDevices()
 	UpdateInterrupts();
 }
 
-void RunSIBuffer()
+SIDevices GetDeviceType(int channel)
 {
-	// Math inLength
-	int inLength = g_ComCSR.INLNGTH;
-	if (inLength == 0)
-		inLength = 128;
+	if (channel < 0 || channel > 3)
+		return SIDEVICE_NONE;
 	else
-		inLength++;
+		return g_Channel[channel].m_pDevice->GetDeviceType();
+}
 
-	// Math outLength
-	int outLength = g_ComCSR.OUTLNGTH;
-	if (outLength == 0)
-		outLength = 128;
-	else
-		outLength++;
+void RunSIBuffer(u64 userdata, int cyclesLate)
+{
+	if (g_ComCSR.TSTART)
+	{
+		// Math inLength
+		int inLength = g_ComCSR.INLNGTH;
+		if (inLength == 0)
+			inLength = 128;
+		else
+			inLength++;
 
-	int numOutput = g_Channel[g_ComCSR.CHANNEL].m_pDevice->RunBuffer(g_SIBuffer, inLength);
+		// Math outLength
+		int outLength = g_ComCSR.OUTLNGTH;
+		if (outLength == 0)
+			outLength = 128;
+		else
+			outLength++;
 
-	DEBUG_LOG(SERIALINTERFACE, "RunSIBuffer     (intLen: %i    outLen: %i) (processed: %i)", inLength, outLength, numOutput);
+		int numOutput = 0;
 
-	// Transfer completed
-	GenerateSIInterrupt(INT_TCINT);
-	g_ComCSR.TSTART = 0;
+		numOutput = g_Channel[g_ComCSR.CHANNEL].m_pDevice->RunBuffer(g_SIBuffer, inLength);
+
+		DEBUG_LOG(SERIALINTERFACE, "RunSIBuffer  chan: %d  inLen: %i  outLen: %i  processed: %i", g_ComCSR.CHANNEL, inLength, outLength, numOutput);
+
+		if (numOutput != 0)
+		{
+			g_ComCSR.TSTART = 0;
+			GenerateSIInterrupt(INT_TCINT);
+		}
+		else
+		{
+			CoreTiming::ScheduleEvent(g_Channel[g_ComCSR.CHANNEL].m_pDevice->TransferInterval() - cyclesLate, et_transfer_pending);
+		}
+	}
 }
 
 int GetTicksToNextSIPoll()
 {
 	// Poll for input at regular intervals (once per frame) when playing or recording a movie
-	if (Movie::IsPlayingInput() || Movie::IsRecordingInput())
+	if (Movie::IsMovieActive())
 	{
 		if (Movie::IsNetPlayRecording())
 			return SystemTimers::GetTicksPerSecond() / VideoInterface::TargetRefreshRate / 2;

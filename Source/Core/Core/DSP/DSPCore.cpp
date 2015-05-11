@@ -23,7 +23,7 @@
 
    ====================================================================*/
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/Event.h"
 #include "Common/FileUtil.h"
 #include "Common/Hash.h"
@@ -34,6 +34,7 @@
 #include "Core/DSP/DSPEmitter.h"
 #include "Core/DSP/DSPHost.h"
 #include "Core/DSP/DSPHWInterface.h"
+#include "Core/DSP/DSPInterpreter.h"
 #include "Core/DSP/DSPIntUtil.h"
 
 SDSP g_dsp;
@@ -185,10 +186,12 @@ void DSPCore_Shutdown()
 
 	core_state = DSPCORE_STOP;
 
-	if (dspjit) {
+	if (dspjit)
+	{
 		delete dspjit;
 		dspjit = nullptr;
 	}
+
 	DSPCore_FreeMemoryPages();
 
 	g_dsp_cap.reset();

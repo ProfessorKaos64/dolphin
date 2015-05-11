@@ -8,6 +8,7 @@
 #include <cinttypes>
 
 #include "Common/x64Emitter.h"
+#include "Core/PowerPC/PPCAnalyst.h"
 
 enum FlushMode
 {
@@ -33,11 +34,7 @@ struct X64CachedReg
 typedef int XReg;
 typedef int PReg;
 
-#if _M_X86_64
 #define NUMXREGS 16
-#elif _M_X86_32
-#define NUMXREGS 8
-#endif
 
 class RegCache
 {
@@ -47,29 +44,45 @@ protected:
 
 	virtual const int *GetAllocationOrder(size_t& count) = 0;
 
+	virtual BitSet32 GetRegUtilization() = 0;
+	virtual BitSet32 CountRegsIn(size_t preg, u32 lookahead) = 0;
+
 	Gen::XEmitter *emit;
+
+	float ScoreRegister(Gen::X64Reg xreg);
 
 public:
 	RegCache();
-
 	virtual ~RegCache() {}
+
 	void Start();
 
 	void DiscardRegContentsIfCached(size_t preg);
-	void SetEmitter(Gen::XEmitter *emitter) {emit = emitter;}
+	void SetEmitter(Gen::XEmitter *emitter)
+	{
+		emit = emitter;
+	}
 
 	void FlushR(Gen::X64Reg reg);
-	void FlushR(Gen::X64Reg reg, Gen::X64Reg reg2) {FlushR(reg); FlushR(reg2);}
-	void FlushLockX(Gen::X64Reg reg) {
+	void FlushR(Gen::X64Reg reg, Gen::X64Reg reg2)
+	{
+		FlushR(reg);
+		FlushR(reg2);
+	}
+
+	void FlushLockX(Gen::X64Reg reg)
+	{
 		FlushR(reg);
 		LockX(reg);
 	}
-	void FlushLockX(Gen::X64Reg reg1, Gen::X64Reg reg2) {
+	void FlushLockX(Gen::X64Reg reg1, Gen::X64Reg reg2)
+	{
 		FlushR(reg1); FlushR(reg2);
 		LockX(reg1); LockX(reg2);
 	}
-	void Flush(FlushMode mode = FLUSH_ALL);
-	void Flush(PPCAnalyst::CodeOp *op) {Flush();}
+
+	void Flush(FlushMode mode = FLUSH_ALL, BitSet32 regsToFlush = BitSet32::AllTrue(32));
+	void Flush(PPCAnalyst::CodeOp *op) { Flush(); }
 	int SanityCheck() const;
 	void KillImmediate(size_t preg, bool doLoad, bool makeDirty);
 
@@ -80,20 +93,51 @@ public:
 	virtual void StoreRegister(size_t preg, Gen::OpArg newLoc) = 0;
 	virtual void LoadRegister(size_t preg, Gen::X64Reg newLoc) = 0;
 
-	const Gen::OpArg &R(size_t preg) const {return regs[preg].location;}
+	const Gen::OpArg &R(size_t preg) const
+	{
+		return regs[preg].location;
+	}
+
 	Gen::X64Reg RX(size_t preg) const
 	{
 		if (IsBound(preg))
 			return regs[preg].location.GetSimpleReg();
 
-		PanicAlert("Not so simple - %" PRIx64, preg);
+		PanicAlert("Not so simple - %u", (unsigned int)preg);
 		return Gen::INVALID_REG;
 	}
 	virtual Gen::OpArg GetDefaultLocation(size_t reg) const = 0;
 
 	// Register locking.
-	void Lock(int p1, int p2=0xff, int p3=0xff, int p4=0xff);
-	void LockX(int x1, int x2=0xff, int x3=0xff, int x4=0xff);
+
+	// these are powerpc reg indices
+	template<typename T>
+	void Lock(T p)
+	{
+		regs[p].locked = true;
+	}
+	template<typename T, typename... Args>
+	void Lock(T first, Args... args)
+	{
+		Lock(first);
+		Lock(args...);
+	}
+
+	// these are x64 reg indices
+	template<typename T>
+	void LockX(T x)
+	{
+		if (xregs[x].locked)
+			PanicAlert("RegCache: x %i already locked!", x);
+		xregs[x].locked = true;
+	}
+	template<typename T, typename... Args>
+	void LockX(T first, Args... args)
+	{
+		LockX(first);
+		LockX(args...);
+	}
+
 	void UnlockAll();
 	void UnlockAllX();
 
@@ -109,6 +153,7 @@ public:
 
 
 	Gen::X64Reg GetFreeXReg();
+	int NumFreeRegisters();
 };
 
 class GPRRegCache : public RegCache
@@ -119,6 +164,8 @@ public:
 	Gen::OpArg GetDefaultLocation(size_t reg) const override;
 	const int* GetAllocationOrder(size_t& count) override;
 	void SetImmediate32(size_t preg, u32 immValue);
+	BitSet32 GetRegUtilization() override;
+	BitSet32 CountRegsIn(size_t preg, u32 lookahead) override;
 };
 
 
@@ -129,4 +176,6 @@ public:
 	void LoadRegister(size_t preg, Gen::X64Reg newLoc) override;
 	const int* GetAllocationOrder(size_t& count) override;
 	Gen::OpArg GetDefaultLocation(size_t reg) const override;
+	BitSet32 GetRegUtilization() override;
+	BitSet32 CountRegsIn(size_t preg, u32 lookahead) override;
 };

@@ -13,6 +13,8 @@
 
 #include "Common/Common.h"
 
+std::string StringFromFormatV(const char* format, va_list args);
+
 std::string StringFromFormat(const char* format, ...)
 #if !defined _WIN32
 // On compilers that support function attributes, this gives StringFromFormat
@@ -64,6 +66,8 @@ template <typename N>
 static bool TryParse(const std::string &str, N *const output)
 {
 	std::istringstream iss(str);
+	// is this right? not doing this breaks reading floats on locales that use different decimal separators
+	iss.imbue(std::locale("C"));
 
 	N tmp = 0;
 	if (iss >> tmp)
@@ -73,6 +77,23 @@ static bool TryParse(const std::string &str, N *const output)
 	}
 	else
 		return false;
+}
+
+template <typename N>
+bool TryParseVector(const std::string& str, std::vector<N>* output, const char delimiter = ',')
+{
+	output->clear();
+	std::istringstream buffer(str);
+	std::string variable;
+
+	while (std::getline(buffer, variable, delimiter))
+	{
+		N tmp = 0;
+		if (!TryParse(variable, &tmp))
+			return false;
+		output->push_back(tmp);
+	}
+	return true;
 }
 
 // TODO: kill this
@@ -87,8 +108,6 @@ bool SplitPath(const std::string& full_path, std::string* _pPath, std::string* _
 
 void BuildCompleteFilename(std::string& _CompleteFilename, const std::string& _Path, const std::string& _Filename);
 std::string ReplaceAll(std::string result, const std::string& src, const std::string& dest);
-std::string UriDecode(const std::string & sSrc);
-std::string UriEncode(const std::string & sSrc);
 
 std::string CP1252ToUTF8(const std::string& str);
 std::string SHIFTJISToUTF8(const std::string& str);

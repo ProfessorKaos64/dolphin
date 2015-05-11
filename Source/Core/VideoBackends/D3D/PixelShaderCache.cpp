@@ -35,6 +35,7 @@ ID3D11PixelShader* s_ColorMatrixProgram[2] = {nullptr};
 ID3D11PixelShader* s_ColorCopyProgram[2] = {nullptr};
 ID3D11PixelShader* s_DepthMatrixProgram[2] = {nullptr};
 ID3D11PixelShader* s_ClearProgram = nullptr;
+ID3D11PixelShader* s_AnaglyphProgram = nullptr;
 ID3D11PixelShader* s_rgba6_to_rgb8[2] = {nullptr};
 ID3D11PixelShader* s_rgb8_to_rgba6[2] = {nullptr};
 ID3D11Buffer* pscbuf = nullptr;
@@ -51,40 +52,65 @@ const char clear_program_code[] = {
 // TODO: Find some way to avoid having separate shaders for non-MSAA and MSAA...
 const char color_copy_program_code[] = {
 	"sampler samp0 : register(s0);\n"
-	"Texture2D Tex0 : register(t0);\n"
+	"Texture2DArray Tex0 : register(t0);\n"
 	"void main(\n"
 	"out float4 ocol0 : SV_Target,\n"
 	"in float4 pos : SV_Position,\n"
-	"in float2 uv0 : TEXCOORD0){\n"
+	"in float3 uv0 : TEXCOORD0){\n"
 	"ocol0 = Tex0.Sample(samp0,uv0);\n"
+	"}\n"
+};
+
+// Anaglyph Red-Cyan shader based on Dubois algorithm
+// Constants taken from the paper:
+// "Conversion of a Stereo Pair to Anaglyph with
+// the Least-Squares Projection Method"
+// Eric Dubois, March 2009
+const char anaglyph_program_code[] = {
+	"sampler samp0 : register(s0);\n"
+	"Texture2DArray Tex0 : register(t0);\n"
+	"void main(\n"
+	"out float4 ocol0 : SV_Target,\n"
+	"in float4 pos : SV_Position,\n"
+	"in float3 uv0 : TEXCOORD0){\n"
+	"float4 c0 = Tex0.Sample(samp0, float3(uv0.xy, 0.0));\n"
+	"float4 c1 = Tex0.Sample(samp0, float3(uv0.xy, 1.0));\n"
+	"float3x3 l = float3x3( 0.437, 0.449, 0.164,\n"
+	"                      -0.062,-0.062,-0.024,\n"
+	"                      -0.048,-0.050,-0.017);\n"
+	"float3x3 r = float3x3(-0.011,-0.032,-0.007,\n"
+	"                       0.377, 0.761, 0.009,\n"
+	"                      -0.026,-0.093, 1.234);\n"
+	"ocol0 = float4(mul(l, c0.rgb) + mul(r, c1.rgb), c0.a);\n"
 	"}\n"
 };
 
 // TODO: Improve sampling algorithm!
 const char color_copy_program_code_msaa[] = {
+	"#define SAMPLES %d\n"
 	"sampler samp0 : register(s0);\n"
-	"Texture2DMS<float4, %d> Tex0 : register(t0);\n"
+	"Texture2DMSArray<float4, SAMPLES> Tex0 : register(t0);\n"
 	"void main(\n"
 	"out float4 ocol0 : SV_Target,\n"
 	"in float4 pos : SV_Position,\n"
-	"in float2 uv0 : TEXCOORD0){\n"
-	"int width, height, samples;\n"
-	"Tex0.GetDimensions(width, height, samples);\n"
+	"in float3 uv0 : TEXCOORD0){\n"
+	"int width, height, slices, samples;\n"
+	"Tex0.GetDimensions(width, height, slices, samples);\n"
 	"ocol0 = 0;\n"
-	"for(int i = 0; i < samples; ++i)\n"
-	"	ocol0 += Tex0.Load(int2(uv0.x*(width), uv0.y*(height)), i);\n"
-	"ocol0 /= samples;\n"
+	"for(int i = 0; i < SAMPLES; ++i)\n"
+	"	ocol0 += Tex0.Load(int3(uv0.x*(width), uv0.y*(height), uv0.z), i);\n"
+	"ocol0 /= SAMPLES;\n"
 	"}\n"
 };
 
 const char color_matrix_program_code[] = {
 	"sampler samp0 : register(s0);\n"
-	"Texture2D Tex0 : register(t0);\n"
+	"Texture2DArray Tex0 : register(t0);\n"
 	"uniform float4 cColMatrix[7] : register(c0);\n"
 	"void main(\n"
 	"out float4 ocol0 : SV_Target,\n"
 	"in float4 pos : SV_Position,\n"
-	" in float2 uv0 : TEXCOORD0){\n"
+	"in float3 uv0 : TEXCOORD0){\n"
 	"float4 texcol = Tex0.Sample(samp0,uv0);\n"
 	"texcol = round(texcol * cColMatrix[5])*cColMatrix[6];\n"
 	"ocol0 = float4(dot(texcol,cColMatrix[0]),dot(texcol,cColMatrix[1]),dot(texcol,cColMatrix[2]),dot(texcol,cColMatrix[3])) + cColMatrix[4];\n"
@@ -92,19 +118,20 @@ const char color_matrix_program_code[] = {
 };
 
 const char color_matrix_program_code_msaa[] = {
+	"#define SAMPLES %d\n"
 	"sampler samp0 : register(s0);\n"
-	"Texture2DMS<float4, %d> Tex0 : register(t0);\n"
+	"Texture2DMSArray<float4, SAMPLES> Tex0 : register(t0);\n"
 	"uniform float4 cColMatrix[7] : register(c0);\n"
 	"void main(\n"
 	"out float4 ocol0 : SV_Target,\n"
 	"in float4 pos : SV_Position,\n"
-	" in float2 uv0 : TEXCOORD0){\n"
-	"int width, height, samples;\n"
-	"Tex0.GetDimensions(width, height, samples);\n"
+	"in float3 uv0 : TEXCOORD0){\n"
+	"int width, height, slices, samples;\n"
+	"Tex0.GetDimensions(width, height, slices, samples);\n"
 	"float4 texcol = 0;\n"
-	"for(int i = 0; i < samples; ++i)\n"
-	"	texcol += Tex0.Load(int2(uv0.x*(width), uv0.y*(height)), i);\n"
-	"texcol /= samples;\n"
+	"for(int i = 0; i < SAMPLES; ++i)\n"
+	"	texcol += Tex0.Load(int3(uv0.x*(width), uv0.y*(height), uv0.z), i);\n"
+	"texcol /= SAMPLES;\n"
 	"texcol = round(texcol * cColMatrix[5])*cColMatrix[6];\n"
 	"ocol0 = float4(dot(texcol,cColMatrix[0]),dot(texcol,cColMatrix[1]),dot(texcol,cColMatrix[2]),dot(texcol,cColMatrix[3])) + cColMatrix[4];\n"
 	"}\n"
@@ -112,46 +139,73 @@ const char color_matrix_program_code_msaa[] = {
 
 const char depth_matrix_program[] = {
 	"sampler samp0 : register(s0);\n"
-	"Texture2D Tex0 : register(t0);\n"
+	"Texture2DArray Tex0 : register(t0);\n"
 	"uniform float4 cColMatrix[7] : register(c0);\n"
 	"void main(\n"
 	"out float4 ocol0 : SV_Target,\n"
 	" in float4 pos : SV_Position,\n"
-	" in float2 uv0 : TEXCOORD0){\n"
-	"float4 texcol = Tex0.Sample(samp0,uv0);\n"
-	"float4 EncodedDepth = frac((texcol.r * (16777215.0f/16777216.0f)) * float4(1.0f,256.0f,256.0f*256.0f,1.0f));\n"
-	"texcol = round(EncodedDepth * (16777216.0f/16777215.0f) * float4(255.0f,255.0f,255.0f,15.0f)) / float4(255.0f,255.0f,255.0f,15.0f);\n"
-	"ocol0 = float4(dot(texcol,cColMatrix[0]),dot(texcol,cColMatrix[1]),dot(texcol,cColMatrix[2]),dot(texcol,cColMatrix[3])) + cColMatrix[4];\n"
+	" in float3 uv0 : TEXCOORD0){\n"
+	"	float4 texcol = Tex0.Sample(samp0,uv0);\n"
+	"	int depth = clamp(int(texcol.x * 16777216.0), 0, 0xFFFFFF);\n"
+
+	// Convert to Z24 format
+	"	int4 workspace;\n"
+	"	workspace.r = (depth >> 16) & 255;\n"
+	"	workspace.g = (depth >> 8) & 255;\n"
+	"	workspace.b = depth & 255;\n"
+
+	// Convert to Z4 format
+	"	workspace.a = (depth >> 16) & 0xF0;\n"
+
+	// Normalize components to [0.0..1.0]
+	"	texcol = float4(workspace) / 255.0;\n"
+
+	// Apply color matrix
+	"	ocol0 = float4(dot(texcol,cColMatrix[0]),dot(texcol,cColMatrix[1]),dot(texcol,cColMatrix[2]),dot(texcol,cColMatrix[3])) + cColMatrix[4];\n"
 	"}\n"
 };
 
 const char depth_matrix_program_msaa[] = {
+	"#define SAMPLES %d\n"
 	"sampler samp0 : register(s0);\n"
-	"Texture2DMS<float4, %d> Tex0 : register(t0);\n"
+	"Texture2DMSArray<float4, SAMPLES> Tex0 : register(t0);\n"
 	"uniform float4 cColMatrix[7] : register(c0);\n"
 	"void main(\n"
 	"out float4 ocol0 : SV_Target,\n"
 	" in float4 pos : SV_Position,\n"
-	" in float2 uv0 : TEXCOORD0){\n"
-	"int width, height, samples;\n"
-	"Tex0.GetDimensions(width, height, samples);\n"
-	"float4 texcol = 0;\n"
-	"for(int i = 0; i < samples; ++i)\n"
-	"	texcol += Tex0.Load(int2(uv0.x*(width), uv0.y*(height)), i);\n"
-	"texcol /= samples;\n"
-	"float4 EncodedDepth = frac((texcol.r * (16777215.0f/16777216.0f)) * float4(1.0f,256.0f,256.0f*256.0f,16.0f));\n"
-	"texcol = round(EncodedDepth * (16777216.0f/16777215.0f) * float4(255.0f,255.0f,255.0f,15.0f)) / float4(255.0f,255.0f,255.0f,15.0f);\n"
-	"ocol0 = float4(dot(texcol,cColMatrix[0]),dot(texcol,cColMatrix[1]),dot(texcol,cColMatrix[2]),dot(texcol,cColMatrix[3])) + cColMatrix[4];\n"
+	" in float3 uv0 : TEXCOORD0){\n"
+	"	int width, height, slices, samples;\n"
+	"	Tex0.GetDimensions(width, height, slices, samples);\n"
+	"	float4 texcol = 0;\n"
+	"	for(int i = 0; i < SAMPLES; ++i)\n"
+	"		texcol += Tex0.Load(int3(uv0.x*(width), uv0.y*(height), uv0.z), i);\n"
+	"	texcol /= SAMPLES;\n"
+	"	int depth = clamp(int(texcol.x * 16777216.0), 0, 0xFFFFFF);\n"
+
+	// Convert to Z24 format
+	"	int4 workspace;\n"
+	"	workspace.r = (depth >> 16) & 255;\n"
+	"	workspace.g = (depth >> 8) & 255;\n"
+	"	workspace.b = depth & 255;\n"
+
+	// Convert to Z4 format
+	"	workspace.a = (depth >> 16) & 0xF0;\n"
+
+	// Normalize components to [0.0..1.0]
+	"	texcol = float4(workspace) / 255.0;\n"
+
+	// Apply color matrix
+	"	ocol0 = float4(dot(texcol,cColMatrix[0]),dot(texcol,cColMatrix[1]),dot(texcol,cColMatrix[2]),dot(texcol,cColMatrix[3])) + cColMatrix[4];\n"
 	"}\n"
 };
 
 const char reint_rgba6_to_rgb8[] = {
 	"sampler samp0 : register(s0);\n"
-	"Texture2D Tex0 : register(t0);\n"
+	"Texture2DArray Tex0 : register(t0);\n"
 	"void main(\n"
 	"	out float4 ocol0 : SV_Target,\n"
 	"	in float4 pos : SV_Position,\n"
-	"	in float2 uv0 : TEXCOORD0)\n"
+	"	in float3 uv0 : TEXCOORD0)\n"
 	"{\n"
 	"	int4 src6 = round(Tex0.Sample(samp0,uv0) * 63.f);\n"
 	"	int4 dst8;\n"
@@ -164,19 +218,20 @@ const char reint_rgba6_to_rgb8[] = {
 };
 
 const char reint_rgba6_to_rgb8_msaa[] = {
+	"#define SAMPLES %d\n"
 	"sampler samp0 : register(s0);\n"
-	"Texture2DMS<float4, %d> Tex0 : register(t0);\n"
+	"Texture2DMSArray<float4, SAMPLES> Tex0 : register(t0);\n"
 	"void main(\n"
 	"	out float4 ocol0 : SV_Target,\n"
 	"	in float4 pos : SV_Position,\n"
-	"	in float2 uv0 : TEXCOORD0)\n"
+	"	in float3 uv0 : TEXCOORD0)\n"
 	"{\n"
-	"	int width, height, samples;\n"
-	"	Tex0.GetDimensions(width, height, samples);\n"
+	"	int width, height, slices, samples;\n"
+	"	Tex0.GetDimensions(width, height, slices, samples);\n"
 	"	float4 texcol = 0;\n"
-	"	for (int i = 0; i < samples; ++i)\n"
-	"		texcol += Tex0.Load(int2(uv0.x*(width), uv0.y*(height)), i);\n"
-	"	texcol /= samples;\n"
+	"	for (int i = 0; i < SAMPLES; ++i)\n"
+	"		texcol += Tex0.Load(int3(uv0.x*(width), uv0.y*(height), uv0.z), i);\n"
+	"	texcol /= SAMPLES;\n"
 	"	int4 src6 = round(texcol * 63.f);\n"
 	"	int4 dst8;\n"
 	"	dst8.r = (src6.r << 2) | (src6.g >> 4);\n"
@@ -189,11 +244,11 @@ const char reint_rgba6_to_rgb8_msaa[] = {
 
 const char reint_rgb8_to_rgba6[] = {
 	"sampler samp0 : register(s0);\n"
-	"Texture2D Tex0 : register(t0);\n"
+	"Texture2DArray Tex0 : register(t0);\n"
 	"void main(\n"
 	"	out float4 ocol0 : SV_Target,\n"
 	"	in float4 pos : SV_Position,\n"
-	"	in float2 uv0 : TEXCOORD0)\n"
+	"	in float3 uv0 : TEXCOORD0)\n"
 	"{\n"
 	"	int4 src8 = round(Tex0.Sample(samp0,uv0) * 255.f);\n"
 	"	int4 dst6;\n"
@@ -206,19 +261,20 @@ const char reint_rgb8_to_rgba6[] = {
 };
 
 const char reint_rgb8_to_rgba6_msaa[] = {
+	"#define SAMPLES %d\n"
 	"sampler samp0 : register(s0);\n"
-	"Texture2DMS<float4, %d> Tex0 : register(t0);\n"
+	"Texture2DMSArray<float4, SAMPLES> Tex0 : register(t0);\n"
 	"void main(\n"
 	"	out float4 ocol0 : SV_Target,\n"
 	"	in float4 pos : SV_Position,\n"
-	"	in float2 uv0 : TEXCOORD0)\n"
+	"	in float3 uv0 : TEXCOORD0)\n"
 	"{\n"
-	"	int width, height, samples;\n"
-	"	Tex0.GetDimensions(width, height, samples);\n"
+	"	int width, height, slices, samples;\n"
+	"	Tex0.GetDimensions(width, height, slices, samples);\n"
 	"	float4 texcol = 0;\n"
-	"	for (int i = 0; i < samples; ++i)\n"
-	"		texcol += Tex0.Load(int2(uv0.x*(width), uv0.y*(height)), i);\n"
-	"	texcol /= samples;\n"
+	"	for (int i = 0; i < SAMPLES; ++i)\n"
+	"		texcol += Tex0.Load(int3(uv0.x*(width), uv0.y*(height), uv0.z), i);\n"
+	"	texcol /= SAMPLES;\n"
 	"	int4 src8 = round(texcol * 255.f);\n"
 	"	int4 dst6;\n"
 	"	dst6.r = src8.r >> 2;\n"
@@ -345,6 +401,11 @@ ID3D11PixelShader* PixelShaderCache::GetClearProgram()
 	return s_ClearProgram;
 }
 
+ID3D11PixelShader* PixelShaderCache::GetAnaglyphProgram()
+{
+	return s_AnaglyphProgram;
+}
+
 ID3D11Buffer* &PixelShaderCache::GetConstantBuffer()
 {
 	// TODO: divide the global variables of the generated shaders into about 5 constant buffers to speed this up
@@ -365,7 +426,7 @@ ID3D11Buffer* &PixelShaderCache::GetConstantBuffer()
 class PixelShaderCacheInserter : public LinearDiskCacheReader<PixelShaderUid, u8>
 {
 public:
-	void Read(const PixelShaderUid &key, const u8 *value, u32 value_size)
+	void Read(const PixelShaderUid &key, const u8* value, u32 value_size)
 	{
 		PixelShaderCache::InsertByteCode(key, value, value_size);
 	}
@@ -373,7 +434,7 @@ public:
 
 void PixelShaderCache::Init()
 {
-	unsigned int cbsize = ((sizeof(PixelShaderConstants))&(~0xf))+0x10; // must be a multiple of 16
+	unsigned int cbsize = ROUND_UP(sizeof(PixelShaderConstants), 16); // must be a multiple of 16
 	D3D11_BUFFER_DESC cbdesc = CD3D11_BUFFER_DESC(cbsize, D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
 	D3D::device->CreateBuffer(&cbdesc, nullptr, &pscbuf);
 	CHECK(pscbuf!=nullptr, "Create pixel shader constant buffer");
@@ -383,6 +444,11 @@ void PixelShaderCache::Init()
 	s_ClearProgram = D3D::CompileAndCreatePixelShader(clear_program_code);
 	CHECK(s_ClearProgram!=nullptr, "Create clear pixel shader");
 	D3D::SetDebugObjectName((ID3D11DeviceChild*)s_ClearProgram, "clear pixel shader");
+
+	// used for anaglyph stereoscopy
+	s_AnaglyphProgram = D3D::CompileAndCreatePixelShader(anaglyph_program_code);
+	CHECK(s_AnaglyphProgram != nullptr, "Create anaglyph pixel shader");
+	D3D::SetDebugObjectName((ID3D11DeviceChild*)s_AnaglyphProgram, "anaglyph pixel shader");
 
 	// used when copying/resolving the color buffer
 	s_ColorCopyProgram[0] = D3D::CompileAndCreatePixelShader(color_copy_program_code);
@@ -444,6 +510,7 @@ void PixelShaderCache::Shutdown()
 	SAFE_RELEASE(pscbuf);
 
 	SAFE_RELEASE(s_ClearProgram);
+	SAFE_RELEASE(s_AnaglyphProgram);
 	for (int i = 0; i < 2; ++i)
 	{
 		SAFE_RELEASE(s_ColorCopyProgram[i]);
@@ -534,7 +601,8 @@ bool PixelShaderCache::InsertByteCode(const PixelShaderUid &uid, const void* byt
 	PixelShaders[uid] = newentry;
 	last_entry = &PixelShaders[uid];
 
-	if (!shader) {
+	if (!shader)
+	{
 		// INCSTAT(stats.numPixelShadersFailed);
 		return false;
 	}

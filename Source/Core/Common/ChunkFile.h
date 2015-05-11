@@ -13,6 +13,7 @@
 // - Zero backwards/forwards compatibility
 // - Serialization code for anything complex has to be manually written.
 
+#include <array>
 #include <cstddef>
 #include <deque>
 #include <list>
@@ -23,8 +24,9 @@
 #include <utility>
 #include <vector>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
+#include "Common/Flag.h"
 
 // ewww
 #if _LIBCPP_VERSION
@@ -158,17 +160,44 @@ public:
 		Do(x.second);
 	}
 
+	template <typename T, std::size_t N>
+	void DoArray(std::array<T, N>& x)
+	{
+		DoArray(x.data(), (u32)x.size());
+	}
+
 	template <typename T>
 	void DoArray(T* x, u32 count)
 	{
-		for (u32 i = 0; i != count; ++i)
-			Do(x[i]);
+		static_assert(IsTriviallyCopyable(T), "Only sane for trivially copyable types");
+		DoVoid(x, count * sizeof(T));
+	}
+
+	void Do(Common::Flag& flag)
+	{
+		bool s = flag.IsSet();
+		Do(s);
+		if (mode == MODE_READ)
+			flag.Set(s);
+	}
+
+	template<typename T>
+	void Do(std::atomic<T>& atomic)
+	{
+		T temp = atomic.load();
+		Do(temp);
+		if (mode == MODE_READ)
+			atomic.store(temp);
 	}
 
 	template <typename T>
 	void Do(T& x)
 	{
 		static_assert(IsTriviallyCopyable(T), "Only sane for trivially copyable types");
+		// Note:
+		// Usually we can just use x = **ptr, etc.  However, this doesn't work
+		// for unions containing BitFields (long story, stupid language rules)
+		// or arrays.  This will get optimized anyway.
 		DoVoid((void*)&x, sizeof(x));
 	}
 
@@ -240,8 +269,7 @@ public:
 							LinkedListItem<T>* next = list_cur->next;
 							TFree(list_cur);
 							list_cur = next;
-						}
-						while (list_cur);
+						} while (list_cur);
 					}
 				}
 				break;
@@ -276,41 +304,35 @@ private:
 			Do(elem);
 	}
 
-	__forceinline void DoByte(u8& x)
+	__forceinline
+	void DoVoid(void *data, u32 size)
 	{
 		switch (mode)
 		{
 		case MODE_READ:
-			x = **ptr;
+			memcpy(data, *ptr, size);
 			break;
 
 		case MODE_WRITE:
-			**ptr = x;
+			memcpy(*ptr, data, size);
 			break;
 
 		case MODE_MEASURE:
 			break;
 
 		case MODE_VERIFY:
-			_dbg_assert_msg_(COMMON, (x == **ptr),
-				"Savestate verification failure: %d (0x%X) (at %p) != %d (0x%X) (at %p).\n",
-					x, x, &x, **ptr, **ptr, *ptr);
-			break;
-
-		default:
+			_dbg_assert_msg_(COMMON, !memcmp(data, *ptr, size),
+				"Savestate verification failure: buf %p != %p (size %u).\n",
+					data, *ptr, size);
 			break;
 		}
 
-		++(*ptr);
-	}
-
-	void DoVoid(void *data, u32 size)
-	{
-		for (u32 i = 0; i != size; ++i)
-			DoByte(reinterpret_cast<u8*>(data)[i]);
+		*ptr += size;
 	}
 };
 
+// NOTE: this class is only used in DolphinWX/ISOFile.cpp for caching loaded
+// ISO data. It will be removed when DolphinWX is, so please don't use it.
 class CChunkFileReader
 {
 public:
@@ -318,7 +340,7 @@ public:
 	template<class T>
 	static bool Load(const std::string& _rFilename, u32 _Revision, T& _class)
 	{
-		INFO_LOG(COMMON, "ChunkReader: Loading %s" , _rFilename.c_str());
+		INFO_LOG(COMMON, "ChunkReader: Loading %s", _rFilename.c_str());
 
 		if (!File::Exists(_rFilename))
 			return false;
@@ -328,14 +350,14 @@ public:
 		static const u64 headerSize = sizeof(SChunkHeader);
 		if (fileSize < headerSize)
 		{
-			ERROR_LOG(COMMON,"ChunkReader: File too small");
+			ERROR_LOG(COMMON, "ChunkReader: File too small");
 			return false;
 		}
 
 		File::IOFile pFile(_rFilename, "rb");
 		if (!pFile)
 		{
-			ERROR_LOG(COMMON,"ChunkReader: Can't open file for reading");
+			ERROR_LOG(COMMON, "ChunkReader: Can't open file for reading");
 			return false;
 		}
 
@@ -343,14 +365,14 @@ public:
 		SChunkHeader header;
 		if (!pFile.ReadArray(&header, 1))
 		{
-			ERROR_LOG(COMMON,"ChunkReader: Bad header size");
+			ERROR_LOG(COMMON, "ChunkReader: Bad header size");
 			return false;
 		}
 
 		// Check revision
 		if (header.Revision != _Revision)
 		{
-			ERROR_LOG(COMMON,"ChunkReader: Wrong file revision, got %d expected %d",
+			ERROR_LOG(COMMON, "ChunkReader: Wrong file revision, got %d expected %d",
 				header.Revision, _Revision);
 			return false;
 		}
@@ -359,7 +381,7 @@ public:
 		const u32 sz = (u32)(fileSize - headerSize);
 		if (header.ExpectedSize != sz)
 		{
-			ERROR_LOG(COMMON,"ChunkReader: Bad file size, got %d expected %d",
+			ERROR_LOG(COMMON, "ChunkReader: Bad file size, got %d expected %d",
 				sz, header.ExpectedSize);
 			return false;
 		}
@@ -368,7 +390,7 @@ public:
 		std::vector<u8> buffer(sz);
 		if (!pFile.ReadArray(&buffer[0], sz))
 		{
-			ERROR_LOG(COMMON,"ChunkReader: Error reading file");
+			ERROR_LOG(COMMON, "ChunkReader: Error reading file");
 			return false;
 		}
 
@@ -376,7 +398,7 @@ public:
 		PointerWrap p(&ptr, PointerWrap::MODE_READ);
 		_class.DoState(p);
 
-		INFO_LOG(COMMON, "ChunkReader: Done loading %s" , _rFilename.c_str());
+		INFO_LOG(COMMON, "ChunkReader: Done loading %s", _rFilename.c_str());
 		return true;
 	}
 
@@ -384,11 +406,11 @@ public:
 	template<class T>
 	static bool Save(const std::string& _rFilename, u32 _Revision, T& _class)
 	{
-		INFO_LOG(COMMON, "ChunkReader: Writing %s" , _rFilename.c_str());
+		INFO_LOG(COMMON, "ChunkReader: Writing %s", _rFilename.c_str());
 		File::IOFile pFile(_rFilename, "wb");
 		if (!pFile)
 		{
-			ERROR_LOG(COMMON,"ChunkReader: Error opening file for write");
+			ERROR_LOG(COMMON, "ChunkReader: Error opening file for write");
 			return false;
 		}
 
@@ -410,17 +432,17 @@ public:
 		// Write to file
 		if (!pFile.WriteArray(&header, 1))
 		{
-			ERROR_LOG(COMMON,"ChunkReader: Failed writing header");
+			ERROR_LOG(COMMON, "ChunkReader: Failed writing header");
 			return false;
 		}
 
 		if (!pFile.WriteArray(&buffer[0], sz))
 		{
-			ERROR_LOG(COMMON,"ChunkReader: Failed writing data");
+			ERROR_LOG(COMMON, "ChunkReader: Failed writing data");
 			return false;
 		}
 
-		INFO_LOG(COMMON,"ChunkReader: Done writing %s", _rFilename.c_str());
+		INFO_LOG(COMMON, "ChunkReader: Done writing %s", _rFilename.c_str());
 		return true;
 	}
 

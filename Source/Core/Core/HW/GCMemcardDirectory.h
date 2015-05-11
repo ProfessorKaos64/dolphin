@@ -4,28 +4,37 @@
 
 #pragma once
 
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "Common/Event.h"
 #include "Core/HW/GCMemcard.h"
+#include "DiscIO/Volume.h"
 
 // Uncomment this to write the system data of the memorycard from directory to disc
 //#define _WRITE_MC_HEADER 1
-void MigrateFromMemcardFile(std::string strDirectoryName, int card_index);
+void MigrateFromMemcardFile(const std::string& strDirectoryName, int card_index);
 
 class GCMemcardDirectory : public MemoryCardBase, NonCopyable
 {
 public:
-	GCMemcardDirectory(std::string directory, int slot = 0, u16 sizeMb = MemCard2043Mb, bool ascii = true,
+	GCMemcardDirectory(const std::string& directory, int slot = 0, u16 sizeMb = MemCard2043Mb, bool ascii = true,
 		DiscIO::IVolume::ECountry  card_region = DiscIO::IVolume::COUNTRY_EUROPE, int gameId = 0);
-	~GCMemcardDirectory() { Flush(true); }
-	void Flush(bool exiting = false) override;
-
+	~GCMemcardDirectory();
+	void FlushToFile();
+	void FlushThread();
 	s32 Read(u32 address, s32 length, u8 *destaddress) override;
 	s32 Write(u32 destaddress, s32 length, u8 *srcaddress) override;
 	void ClearBlock(u32 address) override;
-	void ClearAll() override { ; }
+	void ClearAll() override {}
 	void DoState(PointerWrap &p) override;
 
 private:
-	int LoadGCI(std::string fileName, DiscIO::IVolume::ECountry card_region);
+	int LoadGCI(const std::string& fileName, DiscIO::IVolume::ECountry card_region, bool currentGameOnly);
 	inline s32 SaveAreaRW(u32 block, bool writing = false);
 	// s32 DirectoryRead(u32 offset, u32 length, u8* destaddress);
 	s32 DirectoryWrite(u32 destaddress, u32 length, u8 *srcaddress);
@@ -43,4 +52,9 @@ private:
 
 	std::vector<std::string> m_loaded_saves;
 	std::string m_SaveDirectory;
+	const std::chrono::seconds flush_interval = std::chrono::seconds(1);
+	Common::Event m_flush_trigger;
+	std::mutex m_write_mutex;
+	std::atomic<bool> m_exiting;
+	std::thread m_flush_thread;
 };

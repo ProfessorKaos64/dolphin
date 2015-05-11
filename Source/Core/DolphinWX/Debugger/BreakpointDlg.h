@@ -5,7 +5,6 @@
 #pragma once
 
 #include <wx/dialog.h>
-#include <wx/event.h>
 
 class CBreakPointWindow;
 class wxTextCtrl;
@@ -20,6 +19,4 @@ private:
 	wxTextCtrl *m_pEditAddress;
 
 	void OnOK(wxCommandEvent& event);
-
-	DECLARE_EVENT_TABLE();
 };

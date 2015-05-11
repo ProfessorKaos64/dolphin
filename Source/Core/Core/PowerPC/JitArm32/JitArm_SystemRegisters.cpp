@@ -3,7 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "Common/ArmEmitter.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
@@ -13,6 +13,8 @@
 #include "Core/PowerPC/JitArm32/Jit.h"
 #include "Core/PowerPC/JitArm32/JitAsm.h"
 #include "Core/PowerPC/JitArm32/JitRegCache.h"
+
+using namespace ArmGen;
 
 FixupBranch JitArm::JumpIfCRFieldBit(int field, int bit, bool jump_if_set)
 {
@@ -74,11 +76,10 @@ void JitArm::mtspr(UGeckoInstruction inst)
 	case SPR_SRR0:
 	case SPR_SRR1:
 		// These are safe to do the easy way, see the bottom of this function.
-		break;
+	break;
 
 	case SPR_LR:
 	case SPR_CTR:
-	case SPR_XER:
 	case SPR_GQR0:
 	case SPR_GQR0 + 1:
 	case SPR_GQR0 + 2:
@@ -88,8 +89,23 @@ void JitArm::mtspr(UGeckoInstruction inst)
 	case SPR_GQR0 + 6:
 	case SPR_GQR0 + 7:
 		// These are safe to do the easy way, see the bottom of this function.
-		break;
-
+	break;
+	case SPR_XER:
+	{
+		ARMReg RD = gpr.R(inst.RD);
+		ARMReg tmp = gpr.GetReg();
+		ARMReg mask = gpr.GetReg();
+		MOVI2R(mask, 0xFF7F);
+		AND(tmp, RD, mask);
+		STRH(tmp, R9, PPCSTATE_OFF(xer_stringctrl));
+		LSR(tmp, RD, XER_CA_SHIFT);
+		AND(tmp, tmp, 1);
+		STRB(tmp, R9, PPCSTATE_OFF(xer_ca));
+		LSR(tmp, RD, XER_OV_SHIFT);
+		STRB(tmp, R9, PPCSTATE_OFF(xer_so_ov));
+		gpr.Unlock(tmp, mask);
+	}
+	break;
 	default:
 		FALLBACK_IF(true);
 	}
@@ -98,12 +114,14 @@ void JitArm::mtspr(UGeckoInstruction inst)
 	ARMReg RD = gpr.R(inst.RD);
 	STR(RD, R9,  PPCSTATE_OFF(spr) + iIndex * 4);
 }
+
 void JitArm::mftb(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITSystemRegistersOff);
 	mfspr(inst);
 }
+
 void JitArm::mfspr(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
@@ -112,12 +130,28 @@ void JitArm::mfspr(UGeckoInstruction inst)
 	u32 iIndex = (inst.SPRU << 5) | (inst.SPRL & 0x1F);
 	switch (iIndex)
 	{
+	case SPR_XER:
+	{
+		gpr.BindToRegister(inst.RD, false);
+		ARMReg RD = gpr.R(inst.RD);
+		ARMReg tmp = gpr.GetReg();
+		LDRH(RD, R9, PPCSTATE_OFF(xer_stringctrl));
+		LDRB(tmp, R9, PPCSTATE_OFF(xer_ca));
+		LSL(tmp, tmp, XER_CA_SHIFT);
+		ORR(RD, RD, tmp);
+		LDRB(tmp, R9, PPCSTATE_OFF(xer_so_ov));
+		LSL(tmp, tmp, XER_OV_SHIFT);
+		ORR(RD, RD, tmp);
+		gpr.Unlock(tmp);
+	}
+	break;
 	case SPR_WPAR:
 	case SPR_DEC:
 	case SPR_TL:
 	case SPR_TU:
 		FALLBACK_IF(true);
 	default:
+		gpr.BindToRegister(inst.RD, false);
 		ARMReg RD = gpr.R(inst.RD);
 		LDR(RD, R9, PPCSTATE_OFF(spr) + iIndex * 4);
 		break;
@@ -137,6 +171,7 @@ void JitArm::mfsr(UGeckoInstruction inst)
 	INSTRUCTION_START
 	JITDISABLE(bJITSystemRegistersOff);
 
+	gpr.BindToRegister(inst.RD, false);
 	LDR(gpr.R(inst.RD), R9, PPCSTATE_OFF(sr[inst.SR]));
 }
 
@@ -159,6 +194,7 @@ void JitArm::mfmsr(UGeckoInstruction inst)
 	INSTRUCTION_START
 	JITDISABLE(bJITSystemRegistersOff);
 
+	gpr.BindToRegister(inst.RD, false);
 	LDR(gpr.R(inst.RD), R9, PPCSTATE_OFF(msr));
 }
 

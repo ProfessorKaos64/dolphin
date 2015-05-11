@@ -4,15 +4,15 @@
 
 #pragma once
 
+#include "VideoBackends/OGL/GLExtensions/GLExtensions.h"
 #include "VideoCommon/CPMemory.h"
+#include "VideoCommon/NativeVertexFormat.h"
 #include "VideoCommon/VertexManagerBase.h"
 
 namespace OGL
 {
 	class GLVertexFormat : public NativeVertexFormat
 	{
-		PortableVertexDeclaration vtx_decl;
-
 	public:
 		GLVertexFormat();
 		~GLVertexFormat();
@@ -40,10 +40,15 @@ public:
 	GLuint m_last_vao;
 protected:
 	virtual void ResetBuffer(u32 stride) override;
+
 private:
 	void Draw(u32 stride);
 	void vFlush(bool useDstAlpha) override;
 	void PrepareDrawBuffers(u32 stride);
+
+	// Alternative buffers in CPU memory for primatives we are going to discard.
+	std::vector<u8> m_cpu_v_buffer;
+	std::vector<u16> m_cpu_i_buffer;
 };
 
 }

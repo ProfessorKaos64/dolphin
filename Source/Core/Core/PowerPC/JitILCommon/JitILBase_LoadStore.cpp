@@ -2,14 +2,14 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Core/PowerPC/JitILCommon/JitILBase.h"
 
 void JitILBase::lhax(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStoreOff);
-	FALLBACK_IF(js.memcheck);
+	FALLBACK_IF(jo.memcheck);
 
 	IREmitter::InstLoc addr = ibuild.EmitLoadGReg(inst.RB);
 	if (inst.RA)
@@ -20,11 +20,26 @@ void JitILBase::lhax(UGeckoInstruction inst)
 	ibuild.EmitStoreGReg(val, inst.RD);
 }
 
+void JitILBase::lhaux(UGeckoInstruction inst)
+{
+	INSTRUCTION_START
+	JITDISABLE(bJITLoadStoreOff);
+	FALLBACK_IF(jo.memcheck);
+
+	IREmitter::InstLoc addr = ibuild.EmitLoadGReg(inst.RB);
+	addr = ibuild.EmitAdd(addr, ibuild.EmitLoadGReg(inst.RA));
+
+	IREmitter::InstLoc val = ibuild.EmitLoad16(addr);
+	val = ibuild.EmitSExt16(val);
+	ibuild.EmitStoreGReg(val, inst.RD);
+	ibuild.EmitStoreGReg(addr, inst.RA);
+}
+
 void JitILBase::lXz(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStoreOff);
-	FALLBACK_IF(js.memcheck);
+	FALLBACK_IF(jo.memcheck);
 
 	IREmitter::InstLoc addr = ibuild.EmitIntConst(inst.SIMM_16);
 	if (inst.RA)
@@ -33,13 +48,42 @@ void JitILBase::lXz(UGeckoInstruction inst)
 		ibuild.EmitStoreGReg(addr, inst.RA);
 
 	IREmitter::InstLoc val;
+
+	// Idle Skipping.
+	// TODO: This really should be done somewhere else. Either lower in the IR
+	// or higher in PPCAnalyst
+	// TODO: We shouldn't use debug reads here.
+	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bSkipIdle &&
+		PowerPC::GetState() != PowerPC::CPU_STEPPING &&
+		inst.OPCD == 32 && // Lwx
+		(inst.hex & 0xFFFF0000) == 0x800D0000 &&
+		(PowerPC::HostRead_U32(js.compilerPC + 4) == 0x28000000 ||
+		(SConfig::GetInstance().m_LocalCoreStartupParameter.bWii && PowerPC::HostRead_U32(js.compilerPC + 4) == 0x2C000000)) &&
+		PowerPC::HostRead_U32(js.compilerPC + 8) == 0x4182fff8)
+	{
+		val = ibuild.EmitLoad32(addr);
+		ibuild.EmitIdleBranch(val, ibuild.EmitIntConst(js.compilerPC));
+		ibuild.EmitStoreGReg(val, inst.RD);
+		return;
+	}
+
 	switch (inst.OPCD & ~0x1)
 	{
-	case 32: val = ibuild.EmitLoad32(addr); break; //lwz
-	case 40: val = ibuild.EmitLoad16(addr); break; //lhz
-	case 34: val = ibuild.EmitLoad8(addr);  break; //lbz
-	default: PanicAlert("lXz: invalid access size"); val = nullptr; break;
+	case 32: // lwz
+		val = ibuild.EmitLoad32(addr);
+		break;
+	case 40: // lhz
+		val = ibuild.EmitLoad16(addr);
+		break;
+	case 34: // lbz
+		val = ibuild.EmitLoad8(addr);
+		break;
+	default:
+		PanicAlert("lXz: invalid access size");
+		val = nullptr;
+		break;
 	}
+
 	ibuild.EmitStoreGReg(val, inst.RD);
 }
 
@@ -57,7 +101,7 @@ void JitILBase::lha(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStoreOff);
-	FALLBACK_IF(js.memcheck);
+	FALLBACK_IF(jo.memcheck);
 
 	IREmitter::InstLoc addr = ibuild.EmitIntConst((s32)(s16)inst.SIMM_16);
 
@@ -69,11 +113,27 @@ void JitILBase::lha(UGeckoInstruction inst)
 	ibuild.EmitStoreGReg(val, inst.RD);
 }
 
+void JitILBase::lhau(UGeckoInstruction inst)
+{
+	INSTRUCTION_START
+	JITDISABLE(bJITLoadStoreOff);
+	FALLBACK_IF(jo.memcheck);
+
+	IREmitter::InstLoc addr = ibuild.EmitIntConst((s32)inst.SIMM_16);
+
+	addr = ibuild.EmitAdd(addr, ibuild.EmitLoadGReg(inst.RA));
+
+	IREmitter::InstLoc val = ibuild.EmitLoad16(addr);
+	val = ibuild.EmitSExt16(val);
+	ibuild.EmitStoreGReg(val, inst.RD);
+	ibuild.EmitStoreGReg(addr, inst.RA);
+}
+
 void JitILBase::lXzx(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStoreOff);
-	FALLBACK_IF(js.memcheck);
+	FALLBACK_IF(jo.memcheck);
 
 	IREmitter::InstLoc addr = ibuild.EmitLoadGReg(inst.RB);
 
@@ -87,10 +147,17 @@ void JitILBase::lXzx(UGeckoInstruction inst)
 	IREmitter::InstLoc val;
 	switch (inst.SUBOP10 & ~32)
 	{
-	default: PanicAlert("lXzx: invalid access size");
-	case 23:  val = ibuild.EmitLoad32(addr); break; //lwzx
-	case 279: val = ibuild.EmitLoad16(addr); break; //lhzx
-	case 87:  val = ibuild.EmitLoad8(addr);  break; //lbzx
+	default:
+		PanicAlert("lXzx: invalid access size");
+	case 23:  // lwzx
+		val = ibuild.EmitLoad32(addr);
+		break;
+	case 279: // lhzx
+		val = ibuild.EmitLoad16(addr);
+		break;
+	case 87:  // lbzx
+		val = ibuild.EmitLoad8(addr);
+		break;
 	}
 	ibuild.EmitStoreGReg(val, inst.RD);
 }
@@ -104,7 +171,9 @@ void JitILBase::dcbst(UGeckoInstruction inst)
 	// memory location.  Do not invalidate the JIT cache in this case as the memory
 	// will be the same.
 	// dcbt = 0x7c00022c
-	FALLBACK_IF((Memory::ReadUnchecked_U32(js.compilerPC - 4) & 0x7c00022c) != 0x7c00022c);
+	// TODO: We shouldn't use a debug read here; it should be possible to get the
+	// previous instruction from the JIT state.
+	FALLBACK_IF((PowerPC::HostRead_U32(js.compilerPC - 4) & 0x7c00022c) != 0x7c00022c);
 }
 
 // Zero cache line.
@@ -114,22 +183,19 @@ void JitILBase::dcbz(UGeckoInstruction inst)
 
 	// TODO!
 #if 0
-	if (Core::g_CoreStartupParameter.bJITOff || Core::g_CoreStartupParameter.bJITLoadStoreOff)
-		{Default(inst); return;} // turn off from debugger
+	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bJITOff || SConfig::GetInstance().m_LocalCoreStartupParameter.bJITLoadStoreOff)
+	{
+		Default(inst);
+		return;
+	}
 	INSTRUCTION_START;
-		MOV(32, R(EAX), gpr.R(inst.RB));
+		MOV(32, R(RSCRATCH), gpr.R(inst.RB));
 	if (inst.RA)
-		ADD(32, R(EAX), gpr.R(inst.RA));
-	AND(32, R(EAX), Imm32(~31));
+		ADD(32, R(RSCRATCH), gpr.R(inst.RA));
+	AND(32, R(RSCRATCH), Imm32(~31));
 	PXOR(XMM0, R(XMM0));
-#if _M_X86_64
-	MOVAPS(MComplex(EBX, EAX, SCALE_1, 0), XMM0);
-	MOVAPS(MComplex(EBX, EAX, SCALE_1, 16), XMM0);
-#else
-	AND(32, R(EAX), Imm32(Memory::MEMVIEW32_MASK));
-	MOVAPS(MDisp(EAX, (u32)Memory::base), XMM0);
-	MOVAPS(MDisp(EAX, (u32)Memory::base + 16), XMM0);
-#endif
+	MOVAPS(MComplex(RMEM, RSCRATCH, SCALE_1, 0), XMM0);
+	MOVAPS(MComplex(RMEM, RSCRATCH, SCALE_1, 16), XMM0);
 #endif
 }
 
@@ -137,7 +203,7 @@ void JitILBase::stX(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStoreOff);
-	FALLBACK_IF(js.memcheck);
+	FALLBACK_IF(jo.memcheck);
 
 	IREmitter::InstLoc addr = ibuild.EmitIntConst(inst.SIMM_16);
 	IREmitter::InstLoc value = ibuild.EmitLoadGReg(inst.RS);
@@ -149,10 +215,18 @@ void JitILBase::stX(UGeckoInstruction inst)
 
 	switch (inst.OPCD & ~1)
 	{
-	case 36: ibuild.EmitStore32(value, addr); break; //stw
-	case 44: ibuild.EmitStore16(value, addr); break; //sth
-	case 38: ibuild.EmitStore8(value, addr); break;  //stb
-	default: _assert_msg_(DYNA_REC, 0, "AWETKLJASDLKF"); return;
+	case 36: // stw
+		ibuild.EmitStore32(value, addr);
+		break;
+	case 44: // sth
+		ibuild.EmitStore16(value, addr);
+		break;
+	case 38: // stb
+		ibuild.EmitStore8(value, addr);
+		break;
+	default:
+		_assert_msg_(DYNA_REC, 0, "stX: Invalid access size.");
+		return;
 	}
 }
 
@@ -160,7 +234,7 @@ void JitILBase::stXx(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStoreOff);
-	FALLBACK_IF(js.memcheck);
+	FALLBACK_IF(jo.memcheck);
 
 	IREmitter::InstLoc addr = ibuild.EmitLoadGReg(inst.RB);
 	IREmitter::InstLoc value = ibuild.EmitLoadGReg(inst.RS);
@@ -172,10 +246,18 @@ void JitILBase::stXx(UGeckoInstruction inst)
 
 	switch (inst.SUBOP10 & ~32)
 	{
-	case 151: ibuild.EmitStore32(value, addr); break; //stw
-	case 407: ibuild.EmitStore16(value, addr); break; //sth
-	case 215: ibuild.EmitStore8(value, addr); break;  //stb
-	default: _assert_msg_(DYNA_REC, 0, "AWETKLJASDLKF"); return;
+	case 151: // stw
+		ibuild.EmitStore32(value, addr);
+		break;
+	case 407: // sth
+		ibuild.EmitStore16(value, addr);
+		break;
+	case 215: // stb
+		ibuild.EmitStore8(value, addr);
+		break;
+	default:
+		_assert_msg_(DYNA_REC, 0, "stXx: Invalid store size.");
+		return;
 	}
 }
 
@@ -184,7 +266,7 @@ void JitILBase::lmw(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStoreOff);
-	FALLBACK_IF(js.memcheck);
+	FALLBACK_IF(jo.memcheck);
 
 	IREmitter::InstLoc addr = ibuild.EmitIntConst(inst.SIMM_16);
 
@@ -203,7 +285,7 @@ void JitILBase::stmw(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStoreOff);
-	FALLBACK_IF(js.memcheck);
+	FALLBACK_IF(jo.memcheck);
 
 	IREmitter::InstLoc addr = ibuild.EmitIntConst(inst.SIMM_16);
 

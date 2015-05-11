@@ -5,42 +5,24 @@
 #include <cmath>
 #include <limits>
 
-#ifdef _WIN32
-#include <intrin.h>
-#endif
-
 #include "Common/MathUtil.h"
 #include "Core/PowerPC/Interpreter/Interpreter.h"
 #include "Core/PowerPC/Interpreter/Interpreter_FPUtils.h"
 
 using namespace MathUtil;
 
-void UpdateSSEState();
-
 // Extremely rare - actually, never seen.
 // Star Wars : Rogue Leader spams that at some point :|
 void Interpreter::Helper_UpdateCR1()
 {
-	SetCRField(1, (FPSCR.FX << 4) | (FPSCR.FEX << 3) | (FPSCR.VX << 2) | FPSCR.OX);
+	SetCRField(1, (FPSCR.FX << 3) | (FPSCR.FEX << 2) | (FPSCR.VX << 1) | FPSCR.OX);
 }
 
 void Interpreter::Helper_FloatCompareOrdered(UGeckoInstruction _inst, double fa, double fb)
 {
 	int compareResult;
 
-	if (fa < fb)
-	{
-		compareResult = FPCC::FL;
-	}
-	else if (fa > fb)
-	{
-		compareResult = FPCC::FG;
-	}
-	else if (fa == fb)
-	{
-		compareResult = FPCC::FE;
-	}
-	else // NaN
+	if (IsNAN(fa) || IsNAN(fb))
 	{
 		FPSCR.FX = 1;
 		compareResult = FPCC::FU;
@@ -57,16 +39,7 @@ void Interpreter::Helper_FloatCompareOrdered(UGeckoInstruction _inst, double fa,
 			SetFPException(FPSCR_VXVC);
 		}
 	}
-
-	FPSCR.FPRF = compareResult;
-	SetCRField(_inst.CRFD, compareResult);
-}
-
-void Interpreter::Helper_FloatCompareUnordered(UGeckoInstruction _inst, double fa, double fb)
-{
-	int compareResult;
-
-	if (fa < fb)
+	else if (fa < fb)
 	{
 		compareResult = FPCC::FL;
 	}
@@ -74,21 +47,47 @@ void Interpreter::Helper_FloatCompareUnordered(UGeckoInstruction _inst, double f
 	{
 		compareResult = FPCC::FG;
 	}
-	else if (fa == fb)
+	else // Equals
 	{
 		compareResult = FPCC::FE;
 	}
-	else
+
+	// Clear and set the FPCC bits accordingly.
+	FPSCR.FPRF = (FPSCR.FPRF & ~0xF) | compareResult;
+
+	SetCRField(_inst.CRFD, compareResult);
+}
+
+void Interpreter::Helper_FloatCompareUnordered(UGeckoInstruction _inst, double fa, double fb)
+{
+	int compareResult;
+
+	if (IsNAN(fa) || IsNAN(fb))
 	{
 		compareResult = FPCC::FU;
+
 		if (IsSNAN(fa) || IsSNAN(fb))
 		{
 			FPSCR.FX = 1;
 			SetFPException(FPSCR_VXSNAN);
 		}
 	}
+	else if (fa < fb)
+	{
+		compareResult = FPCC::FL;
+	}
+	else if (fa > fb)
+	{
+		compareResult = FPCC::FG;
+	}
+	else // Equals
+	{
+		compareResult = FPCC::FE;
+	}
 
-	FPSCR.FPRF = compareResult;
+	// Clear and set the FPCC bits accordingly.
+	FPSCR.FPRF = (FPSCR.FPRF & ~0xF) | compareResult;
+
 	SetCRField(_inst.CRFD, compareResult);
 }
 
@@ -297,7 +296,8 @@ void Interpreter::fmulx(UGeckoInstruction _inst)
 }
 void Interpreter::fmulsx(UGeckoInstruction _inst)
 {
-	double d_value = NI_mul(rPS0(_inst.FA), rPS0(_inst.FC));
+	double c_value = Force25Bit(rPS0(_inst.FC));
+	double d_value = NI_mul(rPS0(_inst.FA), c_value);
 	rPS0(_inst.FD) = rPS1(_inst.FD) = ForceSingle(d_value);
 	//FPSCR.FI = d_value != rPS0(_inst.FD);
 	FPSCR.FI = 0;
@@ -320,7 +320,8 @@ void Interpreter::fmaddx(UGeckoInstruction _inst)
 
 void Interpreter::fmaddsx(UGeckoInstruction _inst)
 {
-	double d_value = NI_madd( rPS0(_inst.FA), rPS0(_inst.FC), rPS0(_inst.FB) );
+	double c_value = Force25Bit(rPS0(_inst.FC));
+	double d_value = NI_madd(rPS0(_inst.FA), c_value, rPS0(_inst.FB));
 	rPS0(_inst.FD) = rPS1(_inst.FD) = ForceSingle(d_value);
 	FPSCR.FI = d_value != rPS0(_inst.FD);
 	FPSCR.FR = 0;
@@ -479,8 +480,8 @@ void Interpreter::fmsubx(UGeckoInstruction _inst)
 
 void Interpreter::fmsubsx(UGeckoInstruction _inst)
 {
-	rPS0(_inst.FD) = rPS1(_inst.FD) =
-		ForceSingle(NI_msub(rPS0(_inst.FA), rPS0(_inst.FC), rPS0(_inst.FB)));
+	double c_value = Force25Bit(rPS0(_inst.FC));
+	rPS0(_inst.FD) = rPS1(_inst.FD) = ForceSingle(NI_msub(rPS0(_inst.FA), c_value, rPS0(_inst.FB)));
 	UpdateFPRF(rPS0(_inst.FD));
 
 	if (_inst.Rc)
@@ -498,8 +499,8 @@ void Interpreter::fnmaddx(UGeckoInstruction _inst)
 
 void Interpreter::fnmaddsx(UGeckoInstruction _inst)
 {
-	rPS0(_inst.FD) = rPS1(_inst.FD) =
-		ForceSingle(-NI_madd(rPS0(_inst.FA), rPS0(_inst.FC), rPS0(_inst.FB)));
+	double c_value = Force25Bit(rPS0(_inst.FC));
+	rPS0(_inst.FD) = rPS1(_inst.FD) = ForceSingle(-NI_madd(rPS0(_inst.FA), c_value, rPS0(_inst.FB)));
 	UpdateFPRF(rPS0(_inst.FD));
 
 	if (_inst.Rc)
@@ -518,8 +519,8 @@ void Interpreter::fnmsubx(UGeckoInstruction _inst)
 // fnmsubsx does not handle QNAN properly - see NI_msub
 void Interpreter::fnmsubsx(UGeckoInstruction _inst)
 {
-	rPS0(_inst.FD) = rPS1(_inst.FD) =
-		ForceSingle(-NI_msub(rPS0(_inst.FA), rPS0(_inst.FC), rPS0(_inst.FB)));
+	double c_value = Force25Bit(rPS0(_inst.FC));
+	rPS0(_inst.FD) = rPS1(_inst.FD) = ForceSingle(-NI_msub(rPS0(_inst.FA), c_value, rPS0(_inst.FB)));
 	UpdateFPRF(rPS0(_inst.FD));
 
 	if (_inst.Rc)

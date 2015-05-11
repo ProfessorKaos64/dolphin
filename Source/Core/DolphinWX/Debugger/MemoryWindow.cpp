@@ -8,23 +8,14 @@
 #include <string>
 #include <vector>
 #include <wx/button.h>
-#include <wx/chartype.h>
 #include <wx/checkbox.h>
-#include <wx/defs.h>
-#include <wx/event.h>
-#include <wx/gdicmn.h>
 #include <wx/listbox.h>
 #include <wx/msgdlg.h>
 #include <wx/panel.h>
 #include <wx/sizer.h>
-#include <wx/string.h>
 #include <wx/textctrl.h>
-#include <wx/translation.h>
-#include <wx/window.h>
-#include <wx/windowid.h>
-#include <wx/wxcrtvararg.h>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/IniFile.h"
 #include "Common/StringUtil.h"
@@ -40,11 +31,9 @@
 #include "DolphinWX/Debugger/MemoryView.h"
 #include "DolphinWX/Debugger/MemoryWindow.h"
 
-class DebugInterface;
-
 enum
 {
-	IDM_MEM_ADDRBOX = 350,
+	IDM_MEM_ADDRBOX,
 	IDM_SYMBOLLIST,
 	IDM_SETVALBUTTON,
 	IDM_DUMP_MEMORY,
@@ -61,6 +50,7 @@ enum
 
 BEGIN_EVENT_TABLE(CMemoryWindow, wxPanel)
 	EVT_TEXT(IDM_MEM_ADDRBOX,       CMemoryWindow::OnAddrBoxChange)
+	EVT_TEXT_ENTER(IDM_VALBOX,      CMemoryWindow::SetMemoryValueFromValBox)
 	EVT_LISTBOX(IDM_SYMBOLLIST,     CMemoryWindow::OnSymbolListChange)
 	EVT_HOST_COMMAND(wxID_ANY,      CMemoryWindow::OnHostMessage)
 	EVT_BUTTON(IDM_SETVALBUTTON,    CMemoryWindow::SetMemoryValue)
@@ -95,28 +85,28 @@ CMemoryWindow::CMemoryWindow(wxWindow* parent, wxWindowID id,
 	sizerBig->Add(memview, 20, wxEXPAND);
 	sizerBig->Add(sizerRight, 0, wxEXPAND | wxALL, 3);
 	sizerRight->Add(addrbox = new wxTextCtrl(this, IDM_MEM_ADDRBOX, ""));
-	sizerRight->Add(valbox = new wxTextCtrl(this, IDM_VALBOX, ""));
-	sizerRight->Add(new wxButton(this, IDM_SETVALBUTTON, _("Set &Value")));
+	sizerRight->Add(valbox = new wxTextCtrl(this, IDM_VALBOX, "", wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER));
+	sizerRight->Add(new wxButton(this, IDM_SETVALBUTTON, _("Set Value")));
 
 	sizerRight->AddSpacer(5);
-	sizerRight->Add(new wxButton(this, IDM_DUMP_MEMORY, _("&Dump MRAM")));
-	sizerRight->Add(new wxButton(this, IDM_DUMP_MEM2, _("&Dump EXRAM")));
+	sizerRight->Add(new wxButton(this, IDM_DUMP_MEMORY, _("Dump MRAM")));
+	sizerRight->Add(new wxButton(this, IDM_DUMP_MEM2, _("Dump EXRAM")));
 
-	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bTLBHack == true)
-		sizerRight->Add(new wxButton(this, IDM_DUMP_FAKEVMEM, _("&Dump FakeVMEM")));
+	if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bMMU)
+		sizerRight->Add(new wxButton(this, IDM_DUMP_FAKEVMEM, _("Dump FakeVMEM")));
 
 	wxStaticBoxSizer* sizerSearchType = new wxStaticBoxSizer(wxVERTICAL, this, _("Search"));
 
 	sizerSearchType->Add(btnSearch = new wxButton(this, IDM_SEARCH, _("Search")));
-	sizerSearchType->Add(chkAscii = new wxCheckBox(this, IDM_ASCII, "&Ascii "));
-	sizerSearchType->Add(chkHex = new wxCheckBox(this, IDM_HEX, _("&Hex")));
+	sizerSearchType->Add(chkAscii = new wxCheckBox(this, IDM_ASCII, "Ascii "));
+	sizerSearchType->Add(chkHex = new wxCheckBox(this, IDM_HEX, _("Hex")));
 	sizerRight->Add(sizerSearchType);
 	wxStaticBoxSizer* sizerDataTypes = new wxStaticBoxSizer(wxVERTICAL, this, _("Data Type"));
 
 	sizerDataTypes->SetMinSize(74, 40);
-	sizerDataTypes->Add(chk8 = new wxCheckBox(this, IDM_U8, "&U8"));
-	sizerDataTypes->Add(chk16 = new wxCheckBox(this, IDM_U16, "&U16"));
-	sizerDataTypes->Add(chk32 = new wxCheckBox(this, IDM_U32, "&U32"));
+	sizerDataTypes->Add(chk8 = new wxCheckBox(this, IDM_U8, "U8"));
+	sizerDataTypes->Add(chk16 = new wxCheckBox(this, IDM_U16, "U16"));
+	sizerDataTypes->Add(chk32 = new wxCheckBox(this, IDM_U32, "U32"));
 	sizerRight->Add(sizerDataTypes);
 	SetSizer(sizerBig);
 	chkHex->SetValue(1); //Set defaults
@@ -158,11 +148,18 @@ void CMemoryWindow::JumpToAddress(u32 _Address)
 	memview->Center(_Address);
 }
 
+void CMemoryWindow::SetMemoryValueFromValBox(wxCommandEvent& event)
+{
+	SetMemoryValue(event);
+	valbox->SetFocus();
+
+}
+
 void CMemoryWindow::SetMemoryValue(wxCommandEvent& event)
 {
 	if (!Memory::IsInitialized())
 	{
-		PanicAlertT("Cannot set uninitialized memory.");
+		WxUtils::ShowErrorDialog(_("Cannot set uninitialized memory."));
 		return;
 	}
 
@@ -173,17 +170,17 @@ void CMemoryWindow::SetMemoryValue(wxCommandEvent& event)
 
 	if (!TryParse(std::string("0x") + str_addr, &addr))
 	{
-		PanicAlertT("Invalid Address: %s", str_addr.c_str());
+		WxUtils::ShowErrorDialog(wxString::Format(_("Invalid address: %s"), str_addr.c_str()));
 		return;
 	}
 
 	if (!TryParse(std::string("0x") + str_val, &val))
 	{
-		PanicAlertT("Invalid Value: %s", str_val.c_str());
+		WxUtils::ShowErrorDialog(wxString::Format(_("Invalid value: %s"), str_val.c_str()));
 		return;
 	}
 
-	Memory::Write_U32(val, addr);
+	PowerPC::HostWrite_U32(val, addr);
 	memview->Refresh();
 }
 
@@ -241,7 +238,7 @@ void CMemoryWindow::OnHostMessage(wxCommandEvent& event)
 {
 	switch (event.GetId())
 	{
-		case IDM_NOTIFYMAPLOADED:
+		case IDM_NOTIFY_MAP_LOADED:
 			NotifyMapLoaded();
 			break;
 	}
@@ -278,7 +275,7 @@ void CMemoryWindow::OnDumpMem2( wxCommandEvent& event )
 // Write fake vmem to file
 void CMemoryWindow::OnDumpFakeVMEM( wxCommandEvent& event )
 {
-	DumpArray(File::GetUserPath(F_FAKEVMEMDUMP_IDX), Memory::m_pVirtualFakeVMEM, Memory::FAKEVMEM_SIZE);
+	DumpArray(File::GetUserPath(F_FAKEVMEMDUMP_IDX), Memory::m_pFakeVMEM, Memory::FAKEVMEM_SIZE);
 }
 
 void CMemoryWindow::U8(wxCommandEvent& event)
@@ -425,10 +422,7 @@ void CMemoryWindow::onSearch(wxCommandEvent& event)
 			{
 				//Match was found
 				wxMessageBox(_("A match was found. Placing viewer at the offset."));
-				wxChar tmpwxstr[128] = {0};
-				wxSprintf(tmpwxstr, "%08x", i);
-				wxString tmpwx(tmpwxstr);
-				addrbox->SetValue(tmpwx);
+				addrbox->SetValue(wxString::Format("%08x", i));
 				//memview->curAddress = i;
 				//memview->Refresh();
 				OnAddrBoxChange(event);

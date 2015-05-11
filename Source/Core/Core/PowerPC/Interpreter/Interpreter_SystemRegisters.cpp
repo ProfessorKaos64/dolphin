@@ -2,10 +2,6 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#ifdef _WIN32
-#include <intrin.h>
-#endif
-
 #include "Common/CPUDetect.h"
 #include "Common/FPURoundMode.h"
 #include "Core/HW/GPFifo.h"
@@ -30,7 +26,6 @@ mffsx: 80036650 (huh?)
 
 static void FPSCRtoFPUSettings(UReg_FPSCR fp)
 {
-
 	FPURoundMode::SetRoundMode(fp.RN);
 
 	if (fp.VE || fp.OE || fp.UE || fp.ZE || fp.XE)
@@ -112,14 +107,14 @@ void Interpreter::mtfsfx(UGeckoInstruction _inst)
 
 void Interpreter::mcrxr(UGeckoInstruction _inst)
 {
-	// USES_XER
-	SetCRField(_inst.CRFD, PowerPC::ppcState.spr[SPR_XER] >> 28);
-	PowerPC::ppcState.spr[SPR_XER] &= ~0xF0000000; // clear 0-3
+	SetCRField(_inst.CRFD, GetXER().Hex >> 28);
+	PowerPC::ppcState.xer_ca = 0;
+	PowerPC::ppcState.xer_so_ov = 0;
 }
 
 void Interpreter::mfcr(UGeckoInstruction _inst)
 {
-	m_GPR[_inst.RD] = GetCR();
+	rGPR[_inst.RD] = GetCR();
 }
 
 void Interpreter::mtcrf(UGeckoInstruction _inst)
@@ -127,7 +122,7 @@ void Interpreter::mtcrf(UGeckoInstruction _inst)
 	u32 crm = _inst.CRM;
 	if (crm == 0xFF)
 	{
-		SetCR(m_GPR[_inst.RS]);
+		SetCR(rGPR[_inst.RS]);
 	}
 	else
 	{
@@ -139,7 +134,7 @@ void Interpreter::mtcrf(UGeckoInstruction _inst)
 				mask |= 0xF << (i*4);
 		}
 
-		SetCR((GetCR() & ~mask) | (m_GPR[_inst.RS] & mask));
+		SetCR((GetCR() & ~mask) | (rGPR[_inst.RS] & mask));
 	}
 }
 
@@ -147,24 +142,24 @@ void Interpreter::mtcrf(UGeckoInstruction _inst)
 void Interpreter::mfmsr(UGeckoInstruction _inst)
 {
 	//Privileged?
-	m_GPR[_inst.RD] = MSR;
+	rGPR[_inst.RD] = MSR;
 }
 
 void Interpreter::mfsr(UGeckoInstruction _inst)
 {
-	m_GPR[_inst.RD] = PowerPC::ppcState.sr[_inst.SR];
+	rGPR[_inst.RD] = PowerPC::ppcState.sr[_inst.SR];
 }
 
 void Interpreter::mfsrin(UGeckoInstruction _inst)
 {
-	int index = (m_GPR[_inst.RB] >> 28) & 0xF;
-	m_GPR[_inst.RD] = PowerPC::ppcState.sr[index];
+	int index = (rGPR[_inst.RB] >> 28) & 0xF;
+	rGPR[_inst.RD] = PowerPC::ppcState.sr[index];
 }
 
 void Interpreter::mtmsr(UGeckoInstruction _inst)
 {
 	// Privileged?
-	MSR = m_GPR[_inst.RS];
+	MSR = rGPR[_inst.RS];
 	PowerPC::CheckExceptions();
 	m_EndBlock = true;
 }
@@ -180,14 +175,14 @@ static void SetSR(int index, u32 value)
 void Interpreter::mtsr(UGeckoInstruction _inst)
 {
 	int index = _inst.SR;
-	u32 value = m_GPR[_inst.RS];
+	u32 value = rGPR[_inst.RS];
 	SetSR(index, value);
 }
 
 void Interpreter::mtsrin(UGeckoInstruction _inst)
 {
-	int index = (m_GPR[_inst.RB] >> 28) & 0xF;
-	u32 value = m_GPR[_inst.RS];
+	int index = (rGPR[_inst.RB] >> 28) & 0xF;
+	u32 value = rGPR[_inst.RS];
 	SetSR(index, value);
 }
 
@@ -235,15 +230,18 @@ void Interpreter::mfspr(UGeckoInstruction _inst)
 				rSPR(iIndex) &= ~1;
 		}
 		break;
+	case SPR_XER:
+		rSPR(iIndex) = GetXER().Hex;
+		break;
 	}
-	m_GPR[_inst.RD] = rSPR(iIndex);
+	rGPR[_inst.RD] = rSPR(iIndex);
 }
 
 void Interpreter::mtspr(UGeckoInstruction _inst)
 {
 	u32 iIndex = (_inst.SPRU << 5) | (_inst.SPRL & 0x1F);
 	u32 oldValue = rSPR(iIndex);
-	rSPR(iIndex) = m_GPR[_inst.RD];
+	rSPR(iIndex) = rGPR[_inst.RD];
 
 	//TODO - check processor privilege level - many of these require privilege
 	//XER LR CTR are the only ones available in user mode, time base can be read too.
@@ -260,12 +258,12 @@ void Interpreter::mtspr(UGeckoInstruction _inst)
 		break;
 
 	case SPR_TL_W:
-		TL = m_GPR[_inst.RD];
+		TL = rGPR[_inst.RD];
 		SystemTimers::TimeBaseSet();
 		break;
 
 	case SPR_TU_W:
-		TU = m_GPR[_inst.RD];
+		TU = rGPR[_inst.RD];
 		SystemTimers::TimeBaseSet();
 		break;
 
@@ -299,7 +297,7 @@ void Interpreter::mtspr(UGeckoInstruction _inst)
 		break;
 
 	case SPR_WPAR:
-		_assert_msg_(POWERPC, m_GPR[_inst.RD] == 0x0C008000, "Gather pipe @ %08x", PC);
+		_assert_msg_(POWERPC, rGPR[_inst.RD] == 0x0C008000, "Gather pipe @ %08x", PC);
 		GPFifo::ResetGatherPipe();
 		break;
 
@@ -326,9 +324,9 @@ void Interpreter::mtspr(UGeckoInstruction _inst)
 			if (iLength == 0)
 				iLength = 128;
 			if (DMAL.DMA_LD)
-				Memory::DMA_MemoryToLC(dwCacheAddress, dwMemAddress, iLength);
+				PowerPC::DMA_MemoryToLC(dwCacheAddress, dwMemAddress, iLength);
 			else
-				Memory::DMA_LCToMemory(dwMemAddress, dwCacheAddress, iLength);
+				PowerPC::DMA_LCToMemory(dwMemAddress, dwCacheAddress, iLength);
 		}
 		DMAL.DMA_T = 0;
 		break;
@@ -338,17 +336,21 @@ void Interpreter::mtspr(UGeckoInstruction _inst)
 		break;
 
 	case SPR_DEC:
-		if (!(oldValue >> 31) && (m_GPR[_inst.RD]>>31))   //top bit from 0 to 1
+		if (!(oldValue >> 31) && (rGPR[_inst.RD]>>31))   //top bit from 0 to 1
 		{
 			PanicAlert("Interesting - Software triggered Decrementer exception");
-			Common::AtomicOr(PowerPC::ppcState.Exceptions, EXCEPTION_DECREMENTER);
+			PowerPC::ppcState.Exceptions |= EXCEPTION_DECREMENTER;
 		}
 		SystemTimers::DecrementerSet();
 		break;
 
 	// Page table base etc
 	case SPR_SDR:
-		Memory::SDRUpdated();
+		PowerPC::SDRUpdated();
+		break;
+
+	case SPR_XER:
+		SetXER(rSPR(iIndex));
 		break;
 	}
 }
